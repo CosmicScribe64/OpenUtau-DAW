@@ -29,6 +29,13 @@ for script in scripts/ci-windows.ps1 scripts/package-windows.ps1; do
   fi
 done
 
+for workflow in .github/workflows/build-and-validate.yml .github/workflows/release-candidate.yml; do
+  if ! grep -Fq -- '-Filter "plugin_smoke_tests.exe"' "$workflow"; then
+    echo "$workflow does not locate the actual Windows smoke-host target." >&2
+    exit 1
+  fi
+done
+
 license_eol="$(git check-attr eol -- third_party/licenses/Ignore-0.1.50-MIT.txt)"
 if [[ "$license_eol" != *': eol: lf' ]]; then
   echo "Reviewed licence files must retain LF endings on Windows: $license_eol" >&2

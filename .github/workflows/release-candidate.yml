@@ -64,7 +64,7 @@ jobs:
         shell: pwsh
         run: |
           $smoke = Get-ChildItem .build/windows -Recurse `
-            -Filter "OpenUtau DAW smoke host.exe" | Select-Object -First 1
+            -Filter "plugin_smoke_tests.exe" | Select-Object -First 1
           if ($null -eq $smoke) { throw "Packaged-editor smoke host was not built." }
           $module = "artifacts/windows-x64/OpenUtau DAW.vst3/Contents/x86_64-win/OpenUtau DAW.vst3"
           if (!(Test-Path $module)) { throw "Packaged VST3 module was not found." }
