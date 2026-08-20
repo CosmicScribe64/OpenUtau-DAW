@@ -345,8 +345,12 @@ public static class EntryPoints {
         window.Content = null;
         content.DataContext = window.DataContext;
         Log.Information("Detached OpenUtau content from its window shell.");
-        window.InitProject();
-        Log.Information("Initialized OpenUtau VST project.");
+        // MainWindow.InitProject is the standalone application's command-line
+        // and recovery bootstrap. In a plug-in process those arguments belong
+        // to the DAW (and the Windows smoke host passes the VST3 module path),
+        // so treating them as an OpenUtau project can fail editor creation.
+        // The plug-in restores its project through OpenUtauVstEditorLoadState.
+        Log.Information("Skipped standalone project bootstrap for VST embedding.");
         if (window.DataContext is MainWindowViewModel viewModel) {
             viewModel.PlaybackViewModel.SetExternalTransport(
                 () => Volatile.Read(ref hostPlaying) != 0);

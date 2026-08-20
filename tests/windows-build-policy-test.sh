@@ -78,6 +78,11 @@ if ! grep -Fq 'COREHOST_TRACE' scripts/smoke-windows-package.ps1; then
   echo "Windows package smoke does not capture managed-host diagnostics." >&2
   exit 1
 fi
+if grep -Fq 'window.InitProject();' \
+    bridge/OpenUtau.Vst.EditorHost/EntryPoints.cs; then
+  echo "Embedded editor must not interpret DAW command-line arguments as an OpenUtau project." >&2
+  exit 1
+fi
 
 license_eol="$(git check-attr eol -- third_party/licenses/Ignore-0.1.50-MIT.txt)"
 if [[ "$license_eol" != *': eol: lf' ]]; then
