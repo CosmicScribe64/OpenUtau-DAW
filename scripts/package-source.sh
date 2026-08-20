@@ -40,26 +40,22 @@ fi
 mkdir -p "$root/artifacts"
 temporary="$(mktemp -d "$root/artifacts/.source-package.XXXXXX")"
 trap 'rm -rf "$temporary"' EXIT
-root_tar="$temporary/source.tar"
-upstream_tar="$temporary/upstream.tar"
-juce_tar="$temporary/juce.tar"
+staging="$temporary/staging"
+mkdir -p "$staging"
 
-git -C "$root" archive --format=tar --prefix="$prefix/" "$root_commit" > "$root_tar"
-git -C "$root/upstream" archive --format=tar --prefix="$prefix/upstream/" "$upstream_commit" > "$upstream_tar"
-git -C "$juce_source" archive --format=tar --prefix="$prefix/third_party/JUCE/" "$juce_commit" > "$juce_tar"
-tar -Af "$root_tar" "$upstream_tar"
-tar -Af "$root_tar" "$juce_tar"
+git -C "$root" archive --format=tar --prefix="$prefix/" "$root_commit" | tar -xf - -C "$staging"
+git -C "$root/upstream" archive --format=tar --prefix="$prefix/upstream/" "$upstream_commit" | tar -xf - -C "$staging"
+git -C "$juce_source" archive --format=tar --prefix="$prefix/third_party/JUCE/" "$juce_commit" | tar -xf - -C "$staging"
 
-mkdir -p "$temporary/$prefix"
 {
   echo "OpenUtau DAW $version corresponding source"
   echo "Root commit: $root_commit"
   echo "OpenUtau commit: $upstream_commit"
   echo "JUCE 8.0.15 commit: $juce_commit"
-} > "$temporary/$prefix/SOURCE-BUILD-INFO.txt"
-tar -rf "$root_tar" -C "$temporary" "$prefix/SOURCE-BUILD-INFO.txt"
+} > "$staging/$prefix/SOURCE-BUILD-INFO.txt"
+touch -r "$staging/$prefix/LICENSE" "$staging/$prefix/SOURCE-BUILD-INFO.txt"
 
-gzip -n -9 -c "$root_tar" > "$archive"
+tar -cf - -C "$staging" "$prefix" | gzip -n -9 > "$archive"
 (cd "$(dirname "$archive")" && shasum -a 256 "$(basename "$archive")" > "$(basename "$checksum")")
 
 for required in \
