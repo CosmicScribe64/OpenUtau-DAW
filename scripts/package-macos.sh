@@ -3,6 +3,7 @@ set -euo pipefail
 
 configuration="${CONFIGURATION:-Release}"
 architecture="${ARCHITECTURE:-arm64}"
+macos_deployment_target="${MACOS_DEPLOYMENT_TARGET:-14.0}"
 runtime_version="${DOTNET_RUNTIME_VERSION:-8.0.30}"
 cmake_bin="${CMAKE_BIN:-cmake}"
 juce_source_override="${JUCE_SOURCE_DIR:-}"
@@ -26,6 +27,10 @@ bundle="$output_directory/$bundle_name"
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
   echo "macOS packaging must run on macOS." >&2
+  exit 1
+fi
+if [[ "$architecture" != "arm64" && "$architecture" != "x64" ]]; then
+  echo "ARCHITECTURE must be arm64 or x64." >&2
   exit 1
 fi
 if [[ "$managed_publish_mode" != "docker" && "$managed_publish_mode" != "host" ]]; then
@@ -134,6 +139,7 @@ else
     -B "$build_directory"
     -DCMAKE_BUILD_TYPE="$configuration"
     -DCMAKE_OSX_ARCHITECTURES="$architecture"
+    -DCMAKE_OSX_DEPLOYMENT_TARGET="$macos_deployment_target"
   )
   if [[ -n "$juce_source_override" ]]; then
     if [[ "$(git -C "$juce_source_override" rev-parse HEAD)" != "$juce_commit" ]]; then
@@ -254,6 +260,7 @@ else
 fi
 archive_directory="$(dirname "$archive")"
 (cd "$archive_directory" && shasum -a 256 "$(basename "$archive")" > "$(basename "$archive").sha256")
-PACKAGE_TOOL_MODE="$package_tool_mode" REQUIRE_NOTARIZED="$notarize" \
+ARCHITECTURE="$architecture" PACKAGE_TOOL_MODE="$package_tool_mode" \
+  REQUIRE_NOTARIZED="$notarize" \
   "$root/scripts/verify-macos-package.sh" "$archive" "$output_directory"
 echo "Created $archive"

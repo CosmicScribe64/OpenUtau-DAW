@@ -1,0 +1,6 @@
+#!/usr/bin/env sh
+set -eu
+
+editor_directory="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+exec "$editor_directory/../EmbeddedEditor/dotnet/dotnet" \
+  "$editor_directory/app/OpenUtau.dll" "$@"

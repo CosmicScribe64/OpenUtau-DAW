@@ -1,8 +1,7 @@
 # Public release checklist
 
-This checklist prevents a successful container build from being misrepresented
-as a completed public VST3 release. Check an item only with retained evidence
-(command output, signed artifact, or documented host acceptance).
+Keep the command output or test artifact for each checked item. A passing
+container build does not count as a DAW test.
 
 ## Source and packages
 
@@ -19,6 +18,10 @@ as a completed public VST3 release. Check an item only with retained evidence
   checksum-first install path, and targeted Gatekeeper procedure are disclosed.
 - [ ] The Windows x64 GitHub package passes its native editor smoke test,
   package verification, and Steinberg validator.
+- [ ] The Intel macOS package passes native x64 build, architecture, signature,
+  dependency, checksum, and manifest verification on `macos-15-intel`.
+- [ ] The Linux x64 package passes native build, loaded-VST3 smoke, dependency,
+  checksum, and manifest verification on Ubuntu 24.04.
 - [x] Windows is prominently marked experimental until a licensed FL Studio
   acceptance render with retained FLP/reference-WAV assets passes.
 

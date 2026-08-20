@@ -6,16 +6,17 @@ Apple Developer account or repository secrets.
 
 The workflow:
 
-1. runs the canonical Docker regression suite;
+1. runs the Docker regression suite;
 2. builds the native Windows x64 VST3 on Windows, opens its embedded editor in
    the smoke host, and runs Steinberg's validator;
-3. builds the native Apple-silicon VST3 on an arm64 macOS runner and applies an
-   ad-hoc code signature;
-4. creates the complete corresponding-source archive containing the pinned
+3. builds native Apple-silicon and Intel VST3 packages on architecture-matched
+   macOS runners and applies ad-hoc code signatures;
+4. builds and smoke-tests a Linux x64 VST3 with a companion editor window;
+5. creates the complete corresponding-source archive containing the pinned
    OpenUtau and JUCE source trees;
-5. verifies all three SHA-256 sidecars after transferring the assets between
+6. verifies all five SHA-256 sidecars after transferring the assets between
    isolated jobs; and
-6. attaches both platform ZIPs, the source archive, and all checksum sidecars
+7. attaches four platform ZIPs, the source archive, and all checksum sidecars
    to a draft GitHub prerelease.
 
 All third-party GitHub actions are pinned to immutable full commit SHAs. The
@@ -39,28 +40,26 @@ available in Actions, but **Use workflow from** must select that exact tag and
 the input must contain the same tag. The workflow rejects branch refs,
 lightweight tags, and tags resolving to a different workflow commit.
 
-Signing the Git tag remains encouraged when a GitHub-recognized signing key is
-available, but is not required for this community alpha. SSH authentication,
-the exact tag/commit gate, immutable action pins, package manifests,
-corresponding source, and retained Actions logs provide the available
-provenance.
+Signing the Git tag is recommended when a GitHub-recognized signing key is
+available, but is not required for this alpha.
 
 ## Review and publish
 
-The workflow deliberately stops at a draft. Before selecting **Publish
-release** in GitHub, confirm:
+The workflow stops at a draft. Before selecting **Publish release** in GitHub,
+confirm:
 
-- all four workflow jobs passed;
-- the draft contains macOS arm64, Windows x64, source, and three checksum
-  sidecars;
+- all six workflow jobs passed;
+- the draft contains macOS arm64, macOS x64, Windows x64, Linux x64, source,
+  and five checksum sidecars;
 - Windows is labeled experimental in the notes;
+- Intel macOS and Linux are labeled experimental in the notes;
 - macOS is labeled ad-hoc signed and not Apple-notarized;
 - the checksum sidecars match their downloads; and
 - the known one-visible-editor limitation remains disclosed.
 
 GitHub-hosted macOS runners are used in host mode because Docker is unavailable
 there. Normal development, managed publishing on the target Mac, and the
-canonical portable regression suite remain Docker-first.
+portable regression suite remain Docker-first.
 
 If the project later obtains Apple Developer credentials, the same macOS
 package script supports Developer ID signing, notarization, and stapling with

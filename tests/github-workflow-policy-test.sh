@@ -45,4 +45,14 @@ for safe_directory in \
   fi
 done
 
+for required_release_text in \
+  'runs-on: macos-15-intel' \
+  'OpenUtau-DAW-$RELEASE_TAG-macos-x64.zip' \
+  'OpenUtau-DAW-$RELEASE_TAG-linux-x64.zip'; do
+  if ! grep -Fq "$required_release_text" .github/workflows/release-candidate.yml; then
+    echo "Release workflow is missing platform policy: $required_release_text" >&2
+    exit 1
+  fi
+done
+
 echo "GitHub workflow pinning policy tests passed."

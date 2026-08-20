@@ -2,10 +2,11 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
+architecture="${ARCHITECTURE:-arm64}"
 package_tool_mode="${PACKAGE_TOOL_MODE:-docker}"
 require_notarized="${REQUIRE_NOTARIZED:-0}"
-archive="${1:-$root/artifacts/OpenUtau-DAW-macos-arm64.zip}"
-package="${2:-$root/artifacts/macos-arm64-package}"
+archive="${1:-$root/artifacts/OpenUtau-DAW-macos-$architecture.zip}"
+package="${2:-$root/artifacts/macos-$architecture-package}"
 bundle="$package/OpenUtau DAW.vst3"
 module="$bundle/Contents/MacOS/OpenUtau DAW"
 worldline="$bundle/Contents/Resources/Engine/libworldline.dylib"
@@ -20,6 +21,11 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
   echo "macOS package verification must run on macOS." >&2
   exit 1
 fi
+case "$architecture" in
+  arm64) machine_pattern='arm64' ;;
+  x64) machine_pattern='x86_64' ;;
+  *) echo "ARCHITECTURE must be arm64 or x64." >&2; exit 1 ;;
+esac
 for required in \
   "$archive" "$sidecar" "$bundle" "$module" "$worldline" \
   "$notices" "$agpl" "$source_notice" "$dotnet_license" "$dotnet_notices"
@@ -45,8 +51,12 @@ elif [[ "$require_notarized" != "0" ]]; then
   echo "REQUIRE_NOTARIZED must be 0 or 1." >&2
   exit 1
 fi
-file "$module" | rg -q 'arm64' || { echo "VST3 module is not arm64." >&2; exit 1; }
-file "$worldline" | rg -q 'arm64' || { echo "Worldline renderer is not arm64." >&2; exit 1; }
+file "$module" | rg -q "$machine_pattern" || {
+  echo "VST3 module is not $architecture." >&2; exit 1;
+}
+file "$worldline" | rg -q "$machine_pattern" || {
+  echo "Worldline renderer is not $architecture." >&2; exit 1;
+}
 
 if unzip -Z1 "$archive" | rg -q '(^|/)\._|(^|/)\.DS_Store$'; then
   echo "Archive contains Finder/resource-fork metadata." >&2

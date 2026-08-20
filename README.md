@@ -12,23 +12,23 @@ _The real FL Studio acceptance project on the target Mac: three singer tracks,
 Japanese and English phonemizers, rendered waveforms, and detailed pitch and
 phoneme editing in the embedded OpenUtau workspace._
 
-This repository provides an AGPLv3 open-source alpha. The macOS community build
-is ad-hoc signed rather than Apple-notarized; Windows x64 is an experimental
-build until its licensed FL Studio host test is completed. The current
-implementation and verification evidence are recorded in
+This is an AGPLv3 alpha. The macOS build is ad-hoc signed, not notarized.
+Windows x64 remains experimental until it has been tested in a licensed copy
+of FL Studio. Implementation notes and test results are in
 [docs/architecture.md](docs/architecture.md) and
-[docs/verification.md](docs/verification.md). The concrete release handoff is
-tracked in [docs/release-checklist.md](docs/release-checklist.md).
-The multi-platform community release workflow is documented in
+[docs/verification.md](docs/verification.md). The release checklist is
+[docs/release-checklist.md](docs/release-checklist.md). The GitHub workflow is
+described in
 [docs/github-release.md](docs/github-release.md). Installation instructions are
-available for [macOS arm64](docs/install-macos.md) and
-[Windows x64](docs/install-windows.md).
+available for [macOS arm64/Intel](docs/install-macos.md),
+[Windows x64](docs/install-windows.md), and
+[Linux x64](docs/install-linux.md).
 
 ## Current behavior
 
 - FL Studio discovers **OpenUtau DAW** as a stereo VST3 generator.
-- The complete OpenUtau workspace is embedded in the FL plug-in window; no
-  second desktop editor is required.
+- On macOS and Windows, the complete OpenUtau workspace is embedded in the FL
+  plug-in window; no second desktop editor is required.
 - FL play position, play/stop state, BPM, and time signature update the editor.
 - Plain Space (stop/rewind) and Command+Space on macOS (pause/resume; the
   Control+Space spelling is also accepted) are passed to FL Studio. Stopping
@@ -46,8 +46,8 @@ available for [macOS arm64](docs/install-macos.md) and
 - The separately installed OpenUtau desktop app can run alongside FL Studio
   and the VST3. It is a different process and is not subject to the VST
   editor-window lease.
-- Notes are authored in the embedded OpenUtau editor. The VST3 deliberately
-  does not advertise or capture DAW MIDI input.
+- Notes are authored in the embedded OpenUtau editor. The VST3 does not accept
+  DAW MIDI input.
 
 ## Support status
 
@@ -59,9 +59,10 @@ corresponding-source archive. Voicebanks are not bundled.
 | Platform / host | Status |
 | --- | --- |
 | macOS arm64 + FL Studio 2026 | Verified public alpha; ad-hoc signed and not Apple-notarized |
+| macOS Intel x64 | Automated native package; real Intel DAW acceptance pending |
 | Windows x64 + FL Studio | Experimental alpha; Windows build/editor smoke/Steinberg validation pass, licensed FL evidence pending |
+| Linux x64 + native VST3 DAWs | Experimental package; companion editor window, native DAW acceptance pending |
 | Other VST3 DAWs | Expected to use the standard VST3 contract, but not yet acceptance-tested |
-| Intel macOS | Not built or tested |
 
 ## Container-first development
 
@@ -79,8 +80,7 @@ macOS VST3 must ultimately be linked and signed on macOS, so
 `scripts/package-macos.sh` uses Docker for both managed publishes and a host
 CMake executable only for the final Apple binary. The package carries its own
 private .NET runtime; users do not install .NET, OpenUtau, or development SDKs.
-Each archive is accompanied by a SHA-256 checksum and contains a verified
-file-level SHA-256 manifest for the package contents.
+Each archive has a SHA-256 checksum and a file manifest.
 
 The development image pins the multi-platform Microsoft .NET SDK 8.0.424 base
 by digest, and `global.json` disables SDK roll-forward. GitHub workflows
@@ -104,6 +104,6 @@ the adapter can no longer be reproduced.
 
 The VST adapter and combined distribution use JUCE's AGPLv3 path; upstream
 OpenUtau remains MIT licensed. Public binaries include generated third-party
-notices and exact corresponding source. The macOS community artifact is
-explicitly disclosed as ad-hoc signed and non-notarized. See
+notices and exact corresponding source. The macOS package is ad-hoc signed and
+non-notarized. See
 [docs/licensing.md](docs/licensing.md).

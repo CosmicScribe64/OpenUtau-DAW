@@ -1,10 +1,15 @@
-# Install on Apple-silicon macOS
+# Install on macOS
 
-1. Download the macOS arm64 ZIP and its `.sha256` sidecar from the same GitHub
-   release.
+Choose `macos-arm64` for Apple silicon or `macos-x64` for an Intel Mac. The
+Intel build requires macOS 14 or newer and has automated package coverage but
+has not yet been acceptance-tested in a real Intel DAW.
+
+1. Download the matching macOS ZIP and its `.sha256` sidecar from the same
+   GitHub release.
 2. Verify the checksum:
 
    ```sh
+   # Apple silicon (use macos-x64 instead on an Intel Mac)
    shasum -a 256 -c OpenUtau-DAW-*-macos-arm64.zip.sha256
    ```
 
