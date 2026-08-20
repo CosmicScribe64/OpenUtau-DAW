@@ -14,6 +14,11 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+if(WIN32)
+  # Prevent Windows SDK min/max macros from rewriting standard-library calls.
+  add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN)
+endif()
+
 add_library(openutau_audio_bridge STATIC
   src/audio_ring_buffer.cpp
   src/engine_bridge.cpp
