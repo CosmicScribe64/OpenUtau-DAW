@@ -29,9 +29,9 @@ permission.
 Create and push an annotated tag pointing at the reviewed clean commit:
 
 ```sh
-git tag -a v0.1.0-alpha.1 -m "OpenUtau DAW v0.1.0-alpha.1"
+git tag -a v0.1.0-alpha.2 -m "OpenUtau DAW v0.1.0-alpha.2"
 git push origin main
-git push origin v0.1.0-alpha.1
+git push origin v0.1.0-alpha.2
 ```
 
 The tag push starts the workflow automatically. A manual rerun is also

@@ -6,6 +6,7 @@ set -eu
 ./scripts/verify-editor-audio-isolation.sh
 ./tests/release-tag-test.sh
 ./tests/github-workflow-policy-test.sh
+./tests/windows-build-policy-test.sh
 
 dotnet build bridge/OpenUtau.Vst.sln --configuration Release -p:WarningLevel=0
 ./tests/package-manifest-test.sh

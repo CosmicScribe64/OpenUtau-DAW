@@ -11,6 +11,12 @@ $build = Join-Path $root $BuildDirectory
 $output = Join-Path $root $OutputDirectory
 $publish = Join-Path $build "publish"
 
+function Assert-NativeSuccess([string]$Operation, [int]$ExitCode) {
+    if ($ExitCode -ne 0) {
+        throw "$Operation failed with exit code $ExitCode."
+    }
+}
+
 if ($PackageVersion -and $PackageVersion -notmatch '^[A-Za-z0-9._-]+$') {
     throw "PackageVersion contains unsupported characters: $PackageVersion"
 }
@@ -18,12 +24,15 @@ if ($PackageVersion -and $PackageVersion -notmatch '^[A-Za-z0-9._-]+$') {
 & (Join-Path $root "scripts/apply-upstream-patches.ps1")
 
 cmake -S (Join-Path $root "plugin") -B $build -A x64
+Assert-NativeSuccess "Native configure" $LASTEXITCODE
 cmake --build $build --config $Configuration --target OpenUtauVst_VST3
+Assert-NativeSuccess "VST3 build" $LASTEXITCODE
 
 dotnet publish (Join-Path $root "bridge/OpenUtau.Vst.Engine.Host/OpenUtau.Vst.Engine.Host.csproj") `
     -c $Configuration -r win-x64 --self-contained false `
     -p:UseAppHost=false -p:PublishReadyToRun=false `
     -o (Join-Path $publish "Engine")
+Assert-NativeSuccess "Engine host publish" $LASTEXITCODE
 $enginePublish = Join-Path $publish "Engine"
 foreach ($required in @("OpenUtau.Vst.Engine.Host.dll", "OpenUtau.Plugin.Builtin.dll", "worldline.dll")) {
     if (!(Test-Path (Join-Path $enginePublish $required))) {
@@ -36,6 +45,7 @@ $embeddedApp = Join-Path $embeddedPublish "app"
 dotnet publish (Join-Path $root "bridge/OpenUtau.Vst.EditorHost/OpenUtau.Vst.EditorHost.csproj") `
     -c $Configuration -r win-x64 --self-contained false `
     -p:UseAppHost=false -p:PublishReadyToRun=false -o $embeddedApp
+Assert-NativeSuccess "Embedded editor publish" $LASTEXITCODE
 foreach ($required in @(
     "OpenUtau.Vst.EditorHost.dll",
     "OpenUtau.Vst.EditorHost.runtimeconfig.json",
@@ -57,6 +67,7 @@ $runtimeVersions = @(& $dotnetExe --list-runtimes | ForEach-Object {
         [Version]$Matches[1]
     }
 })
+Assert-NativeSuccess ".NET runtime inventory" $LASTEXITCODE
 if ($runtimeVersions.Count -eq 0) {
     throw "A Microsoft.NETCore.App 8.0 runtime is required for packaging."
 }
@@ -113,11 +124,11 @@ $noticeTool = Join-Path $root "bridge/OpenUtau.Vst.PackageManifest/OpenUtau.Vst.
     $output `
     (Join-Path $enginePublish "OpenUtau.Vst.Engine.Host.deps.json") `
     (Join-Path $embeddedApp "OpenUtau.Vst.EditorHost.deps.json")
-if ($LASTEXITCODE -ne 0) { throw "Could not generate third-party runtime notices." }
+Assert-NativeSuccess "Third-party runtime notice generation" $LASTEXITCODE
 
 & dotnet run --project $noticeTool `
     --configuration $Configuration --no-restore -- create $output
-if ($LASTEXITCODE -ne 0) { throw "Could not create package manifest." }
+Assert-NativeSuccess "Package manifest creation" $LASTEXITCODE
 
 $archiveName = if ($PackageVersion) {
     "OpenUtau-DAW-$PackageVersion-windows-x64.zip"
@@ -129,7 +140,7 @@ if (Test-Path $archive) { Remove-Item $archive -Force }
 Compress-Archive -Path (Join-Path $output "*") -DestinationPath $archive
 & dotnet run --project $noticeTool `
     --configuration $Configuration --no-restore -- verify $archive
-if ($LASTEXITCODE -ne 0) { throw "Packaged archive failed manifest verification." }
+Assert-NativeSuccess "Packaged archive manifest verification" $LASTEXITCODE
 (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant() + "  " + (Split-Path -Leaf $archive) |
     Set-Content -NoNewline "$archive.sha256"
 Write-Host "Created $archive"

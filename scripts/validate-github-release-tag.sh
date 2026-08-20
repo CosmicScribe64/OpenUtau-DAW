@@ -24,17 +24,6 @@ if [[ "$workflow_ref" != "refs/tags/$release_tag" ]]; then
   echo "Run this workflow from the existing $release_tag tag, not $workflow_ref." >&2
   exit 1
 fi
-if [[ "$(git cat-file -t "refs/tags/$release_tag")" != tag ]]; then
-  echo "$release_tag must be an annotated tag." >&2
-  exit 1
-fi
-
-tag_commit="$(git rev-parse "refs/tags/$release_tag^{commit}")"
-if [[ "$tag_commit" != "$expected_commit" ]]; then
-  echo "$release_tag resolves to $tag_commit, not workflow commit $expected_commit." >&2
-  exit 1
-fi
-
 tag_reference="repos/$repository/git/ref/tags/$release_tag"
 tag_object_type="$("$gh_bin" api "$tag_reference" --jq '.object.type')"
 tag_object_sha="$("$gh_bin" api "$tag_reference" --jq '.object.sha')"
@@ -43,8 +32,19 @@ if [[ "$tag_object_type" != tag ]]; then
   exit 1
 fi
 
+tag_object="repos/$repository/git/tags/$tag_object_sha"
+tag_target_type="$("$gh_bin" api "$tag_object" --jq '.object.type')"
+tag_target_sha="$("$gh_bin" api "$tag_object" --jq '.object.sha')"
+if [[ "$tag_target_type" != commit ]]; then
+  echo "$release_tag annotated tag points to $tag_target_type, not a commit." >&2
+  exit 1
+fi
+if [[ "$tag_target_sha" != "$expected_commit" ]]; then
+  echo "$release_tag resolves to $tag_target_sha, not workflow commit $expected_commit." >&2
+  exit 1
+fi
+
 if [[ "$verification_policy" == "verified" ]]; then
-  tag_object="repos/$repository/git/tags/$tag_object_sha"
   tag_verified="$("$gh_bin" api "$tag_object" --jq '.verification.verified')"
   tag_reason="$("$gh_bin" api "$tag_object" --jq '.verification.reason')"
   if [[ "$tag_verified" != true ]]; then

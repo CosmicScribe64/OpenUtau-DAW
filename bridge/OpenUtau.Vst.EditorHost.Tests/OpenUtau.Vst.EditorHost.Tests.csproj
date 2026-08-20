@@ -6,6 +6,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(OS)' == 'Windows_NT'">
+    <TargetFramework>net8.0-windows</TargetFramework>
+  </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\OpenUtau.Vst.EditorHost\OpenUtau.Vst.EditorHost.csproj" />
   </ItemGroup>

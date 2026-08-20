@@ -48,11 +48,17 @@ jobs:
           Remove-Item Env:OPENUTAU_VST_TEST_CREATE_EDITOR
       - shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
           git clone --no-checkout https://github.com/steinbergmedia/vst3sdk.git .build/vst3sdk
+          if ($LASTEXITCODE -ne 0) { throw "Steinberg SDK clone failed." }
           git -C .build/vst3sdk checkout 3cdf9ca5d1f5b1b21e0a86832aa4abe55607bd96
+          if ($LASTEXITCODE -ne 0) { throw "Steinberg SDK checkout failed." }
           git -C .build/vst3sdk submodule update --init --recursive
+          if ($LASTEXITCODE -ne 0) { throw "Steinberg SDK submodule checkout failed." }
           cmake -S .build/vst3sdk -B .build/vst3sdk-build -A x64 -DSMTG_CREATE_PLUGIN_LINK=0
+          if ($LASTEXITCODE -ne 0) { throw "Steinberg validator configure failed." }
           cmake --build .build/vst3sdk-build --config Release --target validator
+          if ($LASTEXITCODE -ne 0) { throw "Steinberg validator build failed." }
           $validator = Get-ChildItem .build/vst3sdk-build -Recurse -Filter validator.exe | Select-Object -First 1
           if ($null -eq $validator) { throw "Steinberg validator executable was not built." }
           & $validator.FullName "artifacts/windows-x64/OpenUtau DAW.vst3"

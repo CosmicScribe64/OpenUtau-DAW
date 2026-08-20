@@ -24,7 +24,9 @@ target_include_directories(openutau_audio_bridge PUBLIC include)
 target_link_libraries(openutau_audio_bridge PUBLIC juce::juce_core)
 target_compile_definitions(openutau_audio_bridge PUBLIC JUCE_USE_CURL=0 JUCE_WEB_BROWSER=0)
 target_compile_options(openutau_audio_bridge PRIVATE
-  $<$<CXX_COMPILER_ID:MSVC>:/W4 /WX>
+  # C4324 reports the deliberate cache-line padding around the ring-buffer
+  # atomics. Keep all other MSVC warnings fatal.
+  $<$<CXX_COMPILER_ID:MSVC>:/W4 /WX /wd4324>
   $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra -Wpedantic -Werror>
 )
 
