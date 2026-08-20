@@ -54,11 +54,15 @@ int main(int argc, char** argv) {
           instance->createEditorAndMakeActive());
       require(editor != nullptr, "Packaged VST3 did not create its editor.");
       if (editor->getWidth() < 800 || editor->getHeight() < 540) {
+        auto diagnostic = "Packaged editor remained at fallback size "
+            + std::to_string(editor->getWidth()) + "x"
+            + std::to_string(editor->getHeight());
         if (auto* status = dynamic_cast<juce::Label*>(
                 editor->findChildWithID("openutau-editor-status"))) {
-          throw std::runtime_error(status->getText().toStdString());
+          diagnostic += "; status: " + status->getText().toStdString();
         }
-        throw std::runtime_error(editor->getName().toStdString());
+        diagnostic += "; editor: " + editor->getName().toStdString();
+        throw std::runtime_error(diagnostic);
       }
     }
 

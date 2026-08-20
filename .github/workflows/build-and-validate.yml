@@ -37,7 +37,7 @@ jobs:
             artifacts/OpenUtau-DAW-linux-x64.zip
             artifacts/OpenUtau-DAW-linux-x64.zip.sha256
 
-  windows-vst3:
+  windows-vst3-tests:
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -49,19 +49,30 @@ jobs:
           dotnet-version: 8.0.424
       - shell: pwsh
         run: ./scripts/ci-windows.ps1
+
+  windows-vst3-package-smoke:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-dotnet@9a946fdbd5fb07b82b2f5a4466058b876ab72bb2 # v5.3.0
+        with:
+          dotnet-version: 8.0.424
       - shell: pwsh
         run: ./scripts/package-windows.ps1
       - shell: pwsh
-        run: |
-          $smoke = Get-ChildItem .build/windows -Recurse `
-            -Filter "plugin_smoke_tests.exe" | Select-Object -First 1
-          if ($null -eq $smoke) { throw "Packaged-editor smoke host was not built." }
-          $module = "artifacts/windows-x64/OpenUtau DAW.vst3/Contents/x86_64-win/OpenUtau DAW.vst3"
-          if (!(Test-Path $module)) { throw "Packaged VST3 module was not found." }
-          $env:OPENUTAU_VST_TEST_CREATE_EDITOR = "1"
-          & $smoke.FullName $module
-          if ($LASTEXITCODE -ne 0) { throw "Embedded Windows editor smoke test failed." }
-          Remove-Item Env:OPENUTAU_VST_TEST_CREATE_EDITOR
+        run: cmake --build .build/windows --config Release --target plugin_smoke_tests
+      - name: Open embedded editor from packaged VST3
+        shell: pwsh
+        run: ./scripts/smoke-windows-package.ps1
+      - if: failure()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: windows-editor-smoke-diagnostics
+          if-no-files-found: warn
+          path: .build/windows-smoke-diagnostics
       - shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -82,7 +93,9 @@ jobs:
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: OpenUtau-DAW-windows-x64
-          path: artifacts/OpenUtau-DAW-windows-x64.zip
+          path: |
+            artifacts/OpenUtau-DAW-windows-x64.zip
+            artifacts/OpenUtau-DAW-windows-x64.zip.sha256
 
   macos-intel-vst3:
     runs-on: macos-15-intel

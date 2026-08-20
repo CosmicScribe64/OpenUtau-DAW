@@ -62,16 +62,13 @@ jobs:
         run: ./scripts/package-windows.ps1 -PackageVersion $env:RELEASE_TAG
       - name: Open embedded editor from packaged VST3
         shell: pwsh
-        run: |
-          $smoke = Get-ChildItem .build/windows -Recurse `
-            -Filter "plugin_smoke_tests.exe" | Select-Object -First 1
-          if ($null -eq $smoke) { throw "Packaged-editor smoke host was not built." }
-          $module = "artifacts/windows-x64/OpenUtau DAW.vst3/Contents/x86_64-win/OpenUtau DAW.vst3"
-          if (!(Test-Path $module)) { throw "Packaged VST3 module was not found." }
-          $env:OPENUTAU_VST_TEST_CREATE_EDITOR = "1"
-          & $smoke.FullName $module
-          if ($LASTEXITCODE -ne 0) { throw "Embedded Windows editor smoke test failed." }
-          Remove-Item Env:OPENUTAU_VST_TEST_CREATE_EDITOR
+        run: ./scripts/smoke-windows-package.ps1
+      - if: failure()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: windows-editor-smoke-diagnostics-${{ env.RELEASE_TAG }}
+          if-no-files-found: warn
+          path: .build/windows-smoke-diagnostics
       - name: Run Steinberg VST3 validator
         shell: pwsh
         run: |

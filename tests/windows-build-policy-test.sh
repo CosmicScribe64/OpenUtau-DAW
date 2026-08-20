@@ -39,11 +39,24 @@ if ! grep -Fq 'WindowsBase.dll' scripts/package-windows.ps1; then
 fi
 
 for workflow in .github/workflows/build-and-validate.yml .github/workflows/release-candidate.yml; do
-  if ! grep -Fq -- '-Filter "plugin_smoke_tests.exe"' "$workflow"; then
-    echo "$workflow does not locate the actual Windows smoke-host target." >&2
+  if ! grep -Fq './scripts/smoke-windows-package.ps1' "$workflow"; then
+    echo "$workflow does not run the diagnostic packaged-editor smoke test." >&2
     exit 1
   fi
 done
+
+if ! grep -Fq 'windows-vst3-package-smoke:' .github/workflows/build-and-validate.yml; then
+  echo "Windows packaging smoke must run independently from the exhaustive test job." >&2
+  exit 1
+fi
+if ! grep -Fq '0x$hexExitCode' scripts/smoke-windows-package.ps1; then
+  echo "Windows package smoke does not report the native crash exit code." >&2
+  exit 1
+fi
+if ! grep -Fq 'COREHOST_TRACE' scripts/smoke-windows-package.ps1; then
+  echo "Windows package smoke does not capture managed-host diagnostics." >&2
+  exit 1
+fi
 
 license_eol="$(git check-attr eol -- third_party/licenses/Ignore-0.1.50-MIT.txt)"
 if [[ "$license_eol" != *': eol: lf' ]]; then
