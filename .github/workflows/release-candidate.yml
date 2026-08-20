@@ -1,0 +1,124 @@
+name: Build signed release candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag and archive version
+        required: true
+        default: v0.1.0-alpha.1
+
+permissions:
+  contents: write
+
+jobs:
+  container-verification:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - run: docker compose build dev
+      - run: docker compose run --rm dev ./scripts/ci.sh
+
+  signed-macos-arm64:
+    needs: container-verification
+    runs-on: macos-15
+    env:
+      MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+      MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+      NOTARY_API_KEY_P8_BASE64: ${{ secrets.NOTARY_API_KEY_P8_BASE64 }}
+      NOTARY_API_KEY_ID: ${{ secrets.NOTARY_API_KEY_ID }}
+      NOTARY_API_ISSUER_ID: ${{ secrets.NOTARY_API_ISSUER_ID }}
+      RELEASE_TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.30
+      - name: Validate release inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "docs/releases/$RELEASE_TAG.md"
+          test -n "$MACOS_CERTIFICATE_P12_BASE64"
+          test -n "$MACOS_CERTIFICATE_PASSWORD"
+          test -n "$MACOS_SIGNING_IDENTITY"
+          test -n "$NOTARY_API_KEY_P8_BASE64"
+          test -n "$NOTARY_API_KEY_ID"
+          test -n "$NOTARY_API_ISSUER_ID"
+          test "$(uname -m)" = arm64
+          cmake --version
+      - name: Import Developer ID certificate
+        shell: bash
+        run: |
+          set -euo pipefail
+          certificate="$RUNNER_TEMP/openutau-release.p12"
+          keychain="$RUNNER_TEMP/openutau-signing.keychain-db"
+          printf '%s' "$MACOS_CERTIFICATE_P12_BASE64" | base64 --decode > "$certificate"
+          security create-keychain -p openutau-temporary-keychain "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p openutau-temporary-keychain "$keychain"
+          security import "$certificate" -P "$MACOS_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$keychain"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k openutau-temporary-keychain "$keychain"
+          security list-keychain -d user -s "$keychain"
+      - name: Build, sign, notarize, and verify macOS package
+        shell: bash
+        run: |
+          set -euo pipefail
+          notary_key="$RUNNER_TEMP/AuthKey.p8"
+          printf '%s' "$NOTARY_API_KEY_P8_BASE64" | base64 --decode > "$notary_key"
+          MANAGED_PUBLISH_MODE=host \
+          PACKAGE_TOOL_MODE=host \
+          PACKAGE_VERSION="$RELEASE_TAG" \
+          BUILD_DIRECTORY="$GITHUB_WORKSPACE/.build/macos-arm64-release" \
+          OUTPUT_DIRECTORY="$GITHUB_WORKSPACE/artifacts/macos-arm64-release" \
+          CODESIGN_IDENTITY="$MACOS_SIGNING_IDENTITY" \
+          NOTARIZE=1 \
+          NOTARY_KEY_PATH="$notary_key" \
+          NOTARY_KEY_ID="$NOTARY_API_KEY_ID" \
+          NOTARY_ISSUER_ID="$NOTARY_API_ISSUER_ID" \
+          ./scripts/package-macos.sh
+      - name: Create complete corresponding-source archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          JUCE_SOURCE_DIR="$GITHUB_WORKSPACE/.build/macos-arm64-release/_deps/juce-src" \
+            ./scripts/package-source.sh "$RELEASE_TAG"
+      - name: Upload retained build evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenUtau-DAW-${{ inputs.tag }}-release-candidate
+          retention-days: 30
+          path: |
+            artifacts/OpenUtau-DAW-${{ inputs.tag }}-macos-arm64.zip
+            artifacts/OpenUtau-DAW-${{ inputs.tag }}-macos-arm64.zip.sha256
+            artifacts/OpenUtau-DAW-${{ inputs.tag }}-source.tar.gz
+            artifacts/OpenUtau-DAW-${{ inputs.tag }}-source.tar.gz.sha256
+      - name: Create or update draft GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          assets=(
+            "artifacts/OpenUtau-DAW-$RELEASE_TAG-macos-arm64.zip"
+            "artifacts/OpenUtau-DAW-$RELEASE_TAG-macos-arm64.zip.sha256"
+            "artifacts/OpenUtau-DAW-$RELEASE_TAG-source.tar.gz"
+            "artifacts/OpenUtau-DAW-$RELEASE_TAG-source.tar.gz.sha256"
+          )
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
+          else
+            gh release create "$RELEASE_TAG" "${assets[@]}" \
+              --target "$GITHUB_SHA" \
+              --title "OpenUtau DAW $RELEASE_TAG" \
+              --notes-file "docs/releases/$RELEASE_TAG.md" \
+              --draft --prerelease
+          fi

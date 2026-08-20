@@ -1,0 +1,9 @@
+<Project>
+  <PropertyGroup>
+    <!-- Keep container and local build products out of every source tree. In
+         Docker, .build is a named volume rather than a host bind mount. -->
+    <BaseOutputPath>$(MSBuildThisFileDirectory).build/dotnet/bin/$(MSBuildProjectName)/</BaseOutputPath>
+    <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory).build/dotnet/obj/$(MSBuildProjectName)/</BaseIntermediateOutputPath>
+    <DefaultItemExcludes>$(DefaultItemExcludes);$(MSBuildProjectDirectory)/bin/**;$(MSBuildProjectDirectory)/obj/**</DefaultItemExcludes>
+  </PropertyGroup>
+</Project>

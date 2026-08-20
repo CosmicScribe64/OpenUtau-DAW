@@ -1,0 +1,816 @@
+diff --git a/.gitignore b/.gitignore
+index 80c9c10..0695499 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -24,6 +24,7 @@ x86/
+ bld/
+ [Bb]in/
+ [Oo]bj/
++.avalonia-build-tasks/
+ [Ll]og/
+ 
+ # Visual Studio 2015/2017 cache/options directory
+diff --git a/OpenUtau.Core/Api/PhonemizerRunner.cs b/OpenUtau.Core/Api/PhonemizerRunner.cs
+index 34c3666..5adeb9d 100644
+--- a/OpenUtau.Core/Api/PhonemizerRunner.cs
++++ b/OpenUtau.Core/Api/PhonemizerRunner.cs
+@@ -12,6 +12,8 @@ namespace OpenUtau.Api {
+     internal class PhonemizerRequest {
+         public USinger singer;
+         public UVoicePart part;
++        public UProject project;
++        public UTrack track;
+         public long timestamp;
+         public int[] noteIndexes;
+         public Phonemizer.Note[][] notes;
+@@ -86,7 +88,7 @@ void SendResponse(PhonemizerResponse response) {
+             }, null, CancellationToken.None, TaskCreationOptions.None, mainScheduler);
+         }
+ 
+-        static PhonemizerResponse Phonemize(PhonemizerRequest request) {
++        internal static PhonemizerResponse Phonemize(PhonemizerRequest request) {
+             var notes = request.notes;
+             var phonemizers = request.phonemizers;
+ 
+@@ -109,7 +111,7 @@ static PhonemizerResponse Phonemize(PhonemizerRequest request) {
+                 p.SetTiming(request.timeAxis);
+                 if (p.SetUpException == null) {
+                     try {
+-                        p.SetUp(notes, DocManager.Inst.Project, DocManager.Inst.Project.tracks[request.part.trackNo]);
++                        p.SetUp(notes, request.project, request.track);
+                     } catch (Exception e) {
+                         Log.Error(e, $"phonemizer failed to setup.");
+                         p.SetUpException = e;
+diff --git a/OpenUtau.Core/DocManager.cs b/OpenUtau.Core/DocManager.cs
+index 96b5010..d145333 100644
+--- a/OpenUtau.Core/DocManager.cs
++++ b/OpenUtau.Core/DocManager.cs
+@@ -20,6 +20,7 @@ public struct ValidateOptions {
+         public UPart Part;
+         public bool SkipPhonemizer;
+         public bool SkipPhoneme;
++        public bool SynchronousPhonemizer;
+     }
+ 
+     public class DocManager : SingletonBase<DocManager> {
+@@ -74,7 +75,7 @@ public void SearchAllPlugins() {
+             var stopWatch = Stopwatch.StartNew();
+             var files = new List<string>();
+             try {
+-                files.Add(Path.Combine(Path.GetDirectoryName(AppContext.BaseDirectory), kBuiltin));
++                files.Add(Path.Combine(PathManager.Inst.RootPath, kBuiltin));
+                 Directory.CreateDirectory(PathManager.Inst.PluginsPath);
+                 string oldBuiltin = Path.Combine(PathManager.Inst.PluginsPath, kBuiltin);
+                 if (File.Exists(oldBuiltin)) {
+@@ -91,7 +92,7 @@ public void SearchAllPlugins() {
+                         Log.Information($"Skipping {file}");
+                         continue;
+                     }
+-                    assembly = Assembly.LoadFile(file);
++                    assembly = Assembly.LoadFrom(file);
+                     foreach (var type in assembly.GetExportedTypes()) {
+                         if (!type.IsAbstract && type.IsSubclassOf(typeof(Phonemizer))) {
+                             PhonemizerFactory.Get(type);
+diff --git a/OpenUtau.Core/Render/RenderEngine.cs b/OpenUtau.Core/Render/RenderEngine.cs
+index 75bc3d3..a6a9c20 100644
+--- a/OpenUtau.Core/Render/RenderEngine.cs
++++ b/OpenUtau.Core/Render/RenderEngine.cs
+@@ -12,9 +12,11 @@
+ namespace OpenUtau.Core.Render {
+     public class Progress {
+         readonly int total;
++        readonly bool notifications;
+         int completed = 0;
+-        public Progress(int total) {
++        public Progress(int total, bool notifications = true) {
+             this.total = total;
++            this.notifications = notifications;
+         }
+ 
+         public void Complete(int n, string info) {
+@@ -27,6 +29,9 @@ public void Clear() {
+         }
+ 
+         private void Notify(double progress, string info) {
++            if (!notifications) {
++                return;
++            }
+             var notif = new ProgressBarNotification(progress, info);
+             var task = new Task(() => DocManager.Inst.ExecuteCmd(notif));
+             task.Start(DocManager.Inst.MainScheduler);
+@@ -47,12 +52,15 @@ class RenderEngine {
+         readonly int startTick;
+         readonly int endTick;
+         readonly int trackNo;
++        readonly bool notifications;
+ 
+-        public RenderEngine(UProject project, int startTick = 0, int endTick = -1, int trackNo = -1) {
++        public RenderEngine(UProject project, int startTick = 0, int endTick = -1,
++                int trackNo = -1, bool notifications = true) {
+             this.project = project;
+             this.startTick = startTick;
+             this.endTick = endTick;
+             this.trackNo = trackNo;
++            this.notifications = notifications;
+         }
+ 
+         // for playback or export
+@@ -248,7 +256,8 @@ private void RenderRequests(
+                     .ToArray();
+                 tuples = orderedTuples;
+             }
+-            var progress = new Progress(tuples.Sum(t => t.Item1.phones.Length));
++            var progress = new Progress(
++                tuples.Sum(t => t.Item1.phones.Length), notifications);
+             foreach (var tuple in tuples) {
+                 var phrase = tuple.Item1;
+                 var source = tuple.Item2;
+@@ -261,7 +270,9 @@ private void RenderRequests(
+                 source.SetSamples(task.Result.samples);
+                 if (request.sources.All(s => s.HasSamples)) {
+                     request.part.SetMix(request.mix);
+-                    DocManager.Inst.ExecuteCmd(new PartRenderedNotification(request.part));
++                    if (notifications) {
++                        DocManager.Inst.ExecuteCmd(new PartRenderedNotification(request.part));
++                    }
+                 }
+             }
+             progress.Clear();
+diff --git a/OpenUtau.Core/Ustx/UPart.cs b/OpenUtau.Core/Ustx/UPart.cs
+index 0eafb8e..43c5983 100644
+--- a/OpenUtau.Core/Ustx/UPart.cs
++++ b/OpenUtau.Core/Ustx/UPart.cs
+@@ -167,6 +167,8 @@ public override void Validate(ValidateOptions options, UProject project, UTrack
+                 var request = new PhonemizerRequest() {
+                     singer = track.Singer,
+                     part = this,
++                    project = project,
++                    track = track,
+                     timestamp = DateTime.Now.ToFileTimeUtc(),
+                     noteIndexes = noteIndexes.ToArray(),
+                     notes = groups.ToArray(),
+@@ -178,7 +180,11 @@ public override void Validate(ValidateOptions options, UProject project, UTrack
+                     timeAxis = project.timeAxis.Clone(),
+                 };
+                 notesTimestamp = request.timestamp;
+-                DocManager.Inst.PhonemizerRunner?.Push(request);
++                if (options.SynchronousPhonemizer) {
++                    phonemizerResponse = PhonemizerRunner.Phonemize(request);
++                } else {
++                    DocManager.Inst.PhonemizerRunner?.Push(request);
++                }
+             }
+             lock (this) {
+                 if (phonemizerResponse != null) {
+diff --git a/OpenUtau.Test/Core/Api/PhonemizerRunnerTest.cs b/OpenUtau.Test/Core/Api/PhonemizerRunnerTest.cs
+new file mode 100644
+index 0000000..a135bfc
+--- /dev/null
++++ b/OpenUtau.Test/Core/Api/PhonemizerRunnerTest.cs
+@@ -0,0 +1,69 @@
++using System;
++using OpenUtau.Api;
++using OpenUtau.Core.Ustx;
++using Xunit;
++
++namespace OpenUtau.Core.Api {
++    public class PhonemizerRunnerTest {
++        [Fact]
++        public void UsesProjectAndTrackCapturedWithRequest() {
++            var project = new UProject();
++            var track = project.tracks[0];
++            var phonemizer = new ContextPhonemizer();
++            var request = new PhonemizerRequest {
++                singer = USinger.CreateMissing("test"),
++                part = new UVoicePart { trackNo = 99 },
++                project = project,
++                track = track,
++                timestamp = 1,
++                noteIndexes = new[] { 0 },
++                notes = new[] {
++                    new[] {
++                        new Phonemizer.Note {
++                            lyric = "test",
++                            tone = 60,
++                            position = 0,
++                            duration = 480,
++                            phonemeAttributes = Array.Empty<Phonemizer.PhonemeAttributes>(),
++                        },
++                    },
++                },
++                phonemizers = new Phonemizer[] { phonemizer },
++                notePhonemizerIndices = new[] { 0 },
++                timeAxis = project.timeAxis.Clone(),
++            };
++
++            var response = PhonemizerRunner.Phonemize(request);
++
++            Assert.Same(project, phonemizer.Project);
++            Assert.Same(track, phonemizer.Track);
++            Assert.Equal("ok", response.phonemes[0][0].phoneme);
++            Assert.Null(response.phonemes[0][0].error);
++        }
++
++        private sealed class ContextPhonemizer : Phonemizer {
++            public UProject Project { get; private set; }
++            public UTrack Track { get; private set; }
++
++            public override void SetSinger(USinger singer) { }
++
++            public override void SetUp(Note[][] notes, UProject project, UTrack track) {
++                base.SetUp(notes, project, track);
++                Project = project;
++                Track = track;
++            }
++
++            public override Result Process(
++                    Note[] notes,
++                    Note? prev,
++                    Note? next,
++                    Note? prevNeighbour,
++                    Note? nextNeighbour,
++                    Note[] prevs) {
++                return new Result {
++                    phonemes = new[] { new Phoneme { phoneme = "ok" } },
++                };
++            }
++        }
++    }
++}
+diff --git a/OpenUtau.Core/Ustx/UTrack.cs b/OpenUtau.Core/Ustx/UTrack.cs
+index d668f0e..bff6db9 100644
+--- a/OpenUtau.Core/Ustx/UTrack.cs
++++ b/OpenUtau.Core/Ustx/UTrack.cs
+@@ -199,7 +199,18 @@ public bool ValidateVoiceColor(out string[] oldColors, out string[] newColors) {
+         }
+ 
+         public void BeforeSave() {
+-            singer = Singer?.Id;
++            // Preserve the serialized identifier when the singer is still
++            // represented by a missing/late-resolving placeholder. Embedded
++            // hosts can load project state before an asynchronously scanned
++            // voicebank is available; replacing that identifier with null
++            // makes the next DAW state snapshot permanently forget the singer.
++            if (Singer == null) {
++                singer = null;
++            } else if (!string.IsNullOrEmpty(Singer.Id)) {
++                singer = Singer.Id;
++            } else if (string.IsNullOrEmpty(singer)) {
++                singer = Singer.Name;
++            }
+             phonemizer = Phonemizer.GetType().FullName;
+             if (Singer != null && Singer.Found && VoiceColorExp != null && VoiceColorExp.options.Length > 0) {
+                 VoiceColorNames = VoiceColorExp.options.ToArray();
+diff --git a/OpenUtau.Core/Util/PathManager.cs b/OpenUtau.Core/Util/PathManager.cs
+index 5a3e08a..4ee8468 100644
+--- a/OpenUtau.Core/Util/PathManager.cs
++++ b/OpenUtau.Core/Util/PathManager.cs
+@@ -14,7 +14,21 @@ namespace OpenUtau.Core {
+ 
+     public class PathManager : SingletonBase<PathManager> {
+         public PathManager() {
+-            RootPath = Path.GetDirectoryName(Assembly.GetEntryAssembly().Location);
++            bool vstSession = Environment.GetEnvironmentVariable("OPENUTAU_VST_SESSION") == "1";
++            string entryLocation = vstSession
++                ? typeof(PathManager).Assembly.Location
++                : Assembly.GetEntryAssembly()?.Location ?? typeof(PathManager).Assembly.Location;
++            RootPath = Path.GetDirectoryName(entryLocation) ?? AppContext.BaseDirectory;
++            string vstDataHome = Environment.GetEnvironmentVariable("OPENUTAU_VST_DATA_HOME");
++            if (!string.IsNullOrWhiteSpace(vstDataHome)) {
++                DataPath = Path.GetFullPath(vstDataHome);
++                string vstCacheHome = Environment.GetEnvironmentVariable("OPENUTAU_VST_CACHE_HOME");
++                CachePath = string.IsNullOrWhiteSpace(vstCacheHome)
++                    ? Path.Combine(DataPath, "Cache")
++                    : Path.GetFullPath(vstCacheHome);
++                HomePathIsAscii = DataPath.All(c => c < 128) && CachePath.All(c => c < 128);
++                return;
++            }
+             if (OS.IsMacOS()) {
+                 string userHome = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                 DataPath = Path.Combine(userHome, "Library", "OpenUtau");
+diff --git a/OpenUtau.Plugin.Builtin/SyllableBasedPhonemizer.cs b/OpenUtau.Plugin.Builtin/SyllableBasedPhonemizer.cs
+index 95ca6df..51cafb8 100644
+--- a/OpenUtau.Plugin.Builtin/SyllableBasedPhonemizer.cs
++++ b/OpenUtau.Plugin.Builtin/SyllableBasedPhonemizer.cs
+@@ -1178,7 +1178,11 @@ protected void ReadDictionaryAndInit() {
+                 return;
+             }
+             dictionaries[GetType()] = null;
+-            if (Testing) {
++            // The desktop app can finish dictionary initialization in the
++            // background and request a later UI-driven project validation.
++            // A VST engine is headless and must make its very first render
++            // deterministic, so initialize dictionaries before returning.
++            if (Testing || Environment.GetEnvironmentVariable("OPENUTAU_VST_SESSION") == "1") {
+                 ReadDictionary(dictionaryName);
+                 Init();
+                 return;
+diff --git a/OpenUtau/App.axaml.cs b/OpenUtau/App.axaml.cs
+index e168d04..fbd0e26 100644
+--- a/OpenUtau/App.axaml.cs
++++ b/OpenUtau/App.axaml.cs
+@@ -17,6 +17,13 @@ public class App : Application {
+         public override void Initialize() {
+             Log.Information("Initializing application.");
+             AvaloniaXamlLoader.Load(this);
++            if (Environment.GetEnvironmentVariable("OPENUTAU_VST_SESSION") == "1") {
++                // This Application lives inside the DAW process. Preserve the
++                // host's global macOS identity instead of replacing its menu
++                // title with the XAML Name="OpenUtau" value.
++                Name = Environment.GetEnvironmentVariable("OPENUTAU_VST_HOST_NAME")
++                    ?? "DAW Host";
++            }
+             InitializeCulture();
+             InitializeTheme();
+             Log.Information("Initialized application.");
+diff --git a/OpenUtau/Controls/PianoRoll.axaml b/OpenUtau/Controls/PianoRoll.axaml
+index 647d221..58233ce 100644
+--- a/OpenUtau/Controls/PianoRoll.axaml
++++ b/OpenUtau/Controls/PianoRoll.axaml
+@@ -205,7 +205,7 @@
+                    Canvas.Top="0" Width="1"
+                    Height="{Binding $parent.Bounds.Height, Mode=OneWay}"
+                    ZIndex="99" IsHitTestVisible="False"
+-                   IsVisible="{Binding PlaybackViewModel.IsPlaying}"
++                   IsVisible="{Binding PlaybackViewModel.ShowPlayPosLine}"
+                    Fill="{DynamicResource AccentBrush2}"/>
+         <Rectangle Name="SelectionBox" StrokeThickness="2"
+                    Stroke="{DynamicResource SystemControlForegroundBaseHighBrush}"
+diff --git a/OpenUtau/Controls/PianoRoll.axaml.cs b/OpenUtau/Controls/PianoRoll.axaml.cs
+index 00cfaae..736bee8 100644
+--- a/OpenUtau/Controls/PianoRoll.axaml.cs
++++ b/OpenUtau/Controls/PianoRoll.axaml.cs
+@@ -1477,9 +1477,15 @@ bool OnKeyExtendedHandler(KeyEventArgs args) {
+ 
+             bool isNone = args.KeyModifiers == KeyModifiers.None;
+             bool isAlt = args.KeyModifiers == KeyModifiers.Alt;
+-            bool isCtrl = args.KeyModifiers == cmdKey;
++            bool isPluginSession =
++                Environment.GetEnvironmentVariable("OPENUTAU_VST_SESSION") == "1";
++            bool isCtrl = args.KeyModifiers == cmdKey
++                || (isPluginSession && OS.IsMacOS()
++                    && args.KeyModifiers == KeyModifiers.Control);
+             bool isShift = args.KeyModifiers == KeyModifiers.Shift;
+-            bool isBoth = args.KeyModifiers == (cmdKey | KeyModifiers.Shift);
++            bool isBoth = args.KeyModifiers == (cmdKey | KeyModifiers.Shift)
++                || (isPluginSession && OS.IsMacOS()
++                    && args.KeyModifiers == (KeyModifiers.Control | KeyModifiers.Shift));
+ 
+             if (PluginMenu.IsSubMenuOpen && isNone) {
+                 if (ViewModel.LegacyPluginShortcuts.ContainsKey(args.Key)) {
+@@ -1528,6 +1534,9 @@ bool OnKeyExtendedHandler(KeyEventArgs args) {
+                 #region document keys
+                 case Key.Space:
+                     if (isNone) {
++                        if (isPluginSession) {
++                            return false;
++                        }
+                         playVm.PlayOrPause();
+                         return true;
+                     }
+diff --git a/OpenUtau/FilePicker.cs b/OpenUtau/FilePicker.cs
+index 4ffdcea..ab479e3 100644
+--- a/OpenUtau/FilePicker.cs
++++ b/OpenUtau/FilePicker.cs
+@@ -1,4 +1,5 @@
+-﻿using System.IO;
++﻿using System;
++using System.IO;
+ using System.Linq;
+ using System.Threading.Tasks;
+ using Avalonia.Controls;
+@@ -62,12 +63,12 @@ internal class FilePicker {
+         };
+ 
+         public async static Task<string?> OpenFile(
+-            Window window, string titleKey, params FilePickerFileType[] types) {
++            TopLevel window, string titleKey, params FilePickerFileType[] types) {
+             return await OpenFile(window, titleKey, null, types);
+         }
+ 
+         public async static Task<string?> OpenFileAboutSinger(
+-            Window window, string titleKey, params FilePickerFileType[] types) {
++            TopLevel window, string titleKey, params FilePickerFileType[] types) {
+             var path = await OpenFile(window, titleKey, Preferences.Default.RecentOpenSingerDirectory, types);
+             var dir = Path.GetDirectoryName(path);
+             if (dir != null) {
+@@ -78,7 +79,7 @@ internal class FilePicker {
+         }
+ 
+         public async static Task<string?> OpenFileAboutProject(
+-            Window window, string titleKey, params FilePickerFileType[] types) {
++            TopLevel window, string titleKey, params FilePickerFileType[] types) {
+             var path = await OpenFile(window, titleKey, Preferences.Default.RecentOpenProjectDirectory, types);
+             var dir = Path.GetDirectoryName(path);
+             if (dir != null) {
+@@ -89,7 +90,7 @@ internal class FilePicker {
+         }
+ 
+         public async static Task<string?> OpenFile(
+-            Window window, string titleKey, string? startLocation, params FilePickerFileType[] types) {
++            TopLevel window, string titleKey, string? startLocation, params FilePickerFileType[] types) {
+             var location = startLocation == null
+                 ? null
+                 : await window.StorageProvider.TryGetFolderFromPathAsync(startLocation);
+@@ -100,6 +101,7 @@ internal class FilePicker {
+                     FileTypeFilter = types,
+                     SuggestedStartLocation = location,
+                 });
++            HideEmbeddedOwner(window);
+             return files
+                 ?.Select(f => f.TryGetLocalPath())
+                 ?.OfType<string>()
+@@ -107,7 +109,7 @@ internal class FilePicker {
+         }
+ 
+         public async static Task<string[]?> OpenFilesAboutProject(
+-                Window window, string titleKey, params FilePickerFileType[] types) {
++                TopLevel window, string titleKey, params FilePickerFileType[] types) {
+             var result = await OpenFiles(window, titleKey, Preferences.Default.RecentOpenProjectDirectory, types);
+             if (result != null) {
+                 var dir = Path.GetDirectoryName(result.FirstOrDefault());
+@@ -120,7 +122,7 @@ internal class FilePicker {
+         }
+ 
+         public async static Task<string[]?> OpenFiles(
+-            Window window, string titleKey, string? startLocation, params FilePickerFileType[] types) {
++            TopLevel window, string titleKey, string? startLocation, params FilePickerFileType[] types) {
+             var location = startLocation == null
+                 ? null
+                 : await window.StorageProvider.TryGetFolderFromPathAsync(startLocation);
+@@ -131,13 +133,14 @@ internal class FilePicker {
+                     FileTypeFilter = types,
+                     SuggestedStartLocation = location
+                 });
++            HideEmbeddedOwner(window);
+             return files
+                 ?.Select(f => f.TryGetLocalPath())
+                 ?.OfType<string>()
+                 ?.ToArray();
+         }
+ 
+-        public async static Task<string?> OpenFolderAboutSinger(Window window, string titleKey) {
++        public async static Task<string?> OpenFolderAboutSinger(TopLevel window, string titleKey) {
+             var dir = await OpenFolder(window, titleKey, Preferences.Default.RecentOpenSingerDirectory);
+             if (dir != null) {
+                 Preferences.Default.RecentOpenSingerDirectory = dir;
+@@ -146,7 +149,7 @@ internal class FilePicker {
+             return dir;
+         }
+ 
+-        public async static Task<string?> OpenFolder(Window window, string titleKey, string? startLocation) {
++        public async static Task<string?> OpenFolder(TopLevel window, string titleKey, string? startLocation) {
+             var location = startLocation == null
+                 ? null
+                 : await window.StorageProvider.TryGetFolderFromPathAsync(startLocation);
+@@ -156,6 +159,7 @@ internal class FilePicker {
+                     AllowMultiple = false,
+                     SuggestedStartLocation = location
+                 });
++            HideEmbeddedOwner(window);
+             return dirs
+                 ?.Select(f => f.TryGetLocalPath())
+                 ?.OfType<string>()
+@@ -163,12 +167,12 @@ internal class FilePicker {
+         }
+ 
+         public async static Task<string?> SaveFile
+-            (Window window, string titleKey, params FilePickerFileType[] types) {
++            (TopLevel window, string titleKey, params FilePickerFileType[] types) {
+             return await SaveFile(window, titleKey, null, null, types);
+         }
+ 
+         public async static Task<string?> SaveFileAboutProject
+-            (Window window, string titleKey, params FilePickerFileType[] types) {
++            (TopLevel window, string titleKey, params FilePickerFileType[] types) {
+             var path = await SaveFile(window, titleKey, Preferences.Default.RecentOpenProjectDirectory, 
+                 Path.GetFileName(Path.ChangeExtension(DocManager.Inst.Project.FilePath, null)), types);
+             var dir = Path.GetDirectoryName(path);
+@@ -180,7 +184,7 @@ public async static Task<string?> SaveFileAboutProject
+         }
+ 
+         public async static Task<string?> SaveFile
+-            (Window window, string titleKey, string? startLocation, string? filename, params FilePickerFileType[] types) {
++            (TopLevel window, string titleKey, string? startLocation, string? filename, params FilePickerFileType[] types) {
+             var location = startLocation == null
+                 ? null
+                 : await window.StorageProvider.TryGetFolderFromPathAsync(startLocation);
+@@ -193,7 +197,16 @@ public async static Task<string?> SaveFile
+                      SuggestedStartLocation = location,
+                      SuggestedFileName = filename,
+                  });
++            HideEmbeddedOwner(window);
+             return file?.TryGetLocalPath();
+         }
++
++        private static void HideEmbeddedOwner(TopLevel owner) {
++            if (Environment.GetEnvironmentVariable("OPENUTAU_VST_SESSION") == "1"
++                    && OS.IsWindows()
++                    && owner is Window window) {
++                window.Hide();
++            }
++        }
+     }
+ }
+diff --git a/OpenUtau/Program.cs b/OpenUtau/Program.cs
+index dab8b10..65d8554 100644
+--- a/OpenUtau/Program.cs
++++ b/OpenUtau/Program.cs
+@@ -23,7 +23,8 @@ public static void Main(string[] args) {
+             Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+             InitLogging();
+             string processName = Process.GetCurrentProcess().ProcessName;
+-            if (processName != "dotnet") {
++            if (processName != "dotnet" &&
++                Environment.GetEnvironmentVariable("OPENUTAU_VST_SESSION") != "1") {
+                 var exists = Process.GetProcessesByName(processName).Count() > 1;
+                 if (exists) {
+                     Log.Information($"Process {processName} already open. Exiting.");
+diff --git a/OpenUtau/ViewModels/PlaybackViewModel.cs b/OpenUtau/ViewModels/PlaybackViewModel.cs
+index ffce8e8..62380ba 100644
+--- a/OpenUtau/ViewModels/PlaybackViewModel.cs
++++ b/OpenUtau/ViewModels/PlaybackViewModel.cs
+@@ -7,6 +7,7 @@
+ namespace OpenUtau.App.ViewModels {
+     public class TimeAxisChangedEvent { }
+     public class PlaybackViewModel : ViewModelBase, ICmdSubscriber {
++        private Func<bool>? externalTransportPlaying;
+         UProject Project => DocManager.Inst.Project;
+         public int BeatPerBar => Project.timeSignatures[0].beatPerBar;
+         public int BeatUnit => Project.timeSignatures[0].beatUnit;
+@@ -17,13 +18,40 @@ public class PlaybackViewModel : ViewModelBase, ICmdSubscriber {
+         public int PlayPosTick => DocManager.Inst.playPosTick;
+         public TimeSpan PlayPosTime => TimeSpan.FromMilliseconds((int)Project.timeAxis.TickPosToMsPos(DocManager.Inst.playPosTick));
+         public bool HasRangeSelection => DocManager.Inst.rangeEndTick > DocManager.Inst.rangeStartTick;
+-        public bool IsPlaying => PlaybackManager.Inst.PlayingMaster;
++        public bool UsesExternalTransport => externalTransportPlaying != null;
++        public bool IsPlaying => externalTransportPlaying?.Invoke() == true || PlaybackManager.Inst.PlayingMaster;
++        public bool ShowPlayPosLine => externalTransportPlaying != null || IsPlaying;
+         public bool ShowPlayPosHighlight => !IsPlaying || HasRangeSelection;
+ 
+         public PlaybackViewModel() {
+             DocManager.Inst.AddSubscriber(this);
+         }
+ 
++        /// <summary>
++        /// Makes the editor follow a DAW transport without starting a second
++        /// OpenUtau playback clock. The embedded VST host supplies a live
++        /// predicate; standalone OpenUtau leaves this unset.
++        /// </summary>
++        public void SetExternalTransport(Func<bool> isPlaying) {
++            externalTransportPlaying = isPlaying;
++            this.RaisePropertyChanged(nameof(UsesExternalTransport));
++            NotifyExternalTransportChanged();
++        }
++
++        public void NotifyExternalTransportChanged() {
++            this.RaisePropertyChanged(nameof(IsPlaying));
++            this.RaisePropertyChanged(nameof(ShowPlayPosLine));
++            this.RaisePropertyChanged(nameof(ShowPlayPosHighlight));
++        }
++
++        public void NotifyExternalTimingChanged() {
++            this.RaisePropertyChanged(nameof(BeatPerBar));
++            this.RaisePropertyChanged(nameof(BeatUnit));
++            this.RaisePropertyChanged(nameof(Bpm));
++            this.RaisePropertyChanged(nameof(PlayPosTime));
++            MessageBus.Current.SendMessage(new TimeAxisChangedEvent());
++        }
++
+         public void SeekStart() {
+             Pause();
+             DocManager.Inst.ExecuteCmd(new SeekPlayPosTickNotification(0));
+@@ -33,6 +61,12 @@ public void SeekEnd() {
+             DocManager.Inst.ExecuteCmd(new SeekPlayPosTickNotification(Project.EndTick));
+         }
+         public void PlayOrPause(int tick = -1, int endTick = -1, int trackNo = -1) {
++            // VST3 does not provide a portable command for starting a DAW's
++            // transport. Embedded sessions therefore follow the host instead
++            // of starting an unsynchronised second playback clock.
++            if (UsesExternalTransport) {
++                return;
++            }
+             PlaybackManager.Inst.PlayOrPause(tick: tick, endTick: endTick, trackNo: trackNo);
+             var lockStartTime = Convert.ToBoolean(Preferences.Default.LockStartTime);
+             if (!PlaybackManager.Inst.OutputActive && !PlaybackManager.Inst.StartingToPlay && lockStartTime) {
+@@ -93,6 +127,7 @@ cmd is KeyCommand ||
+                     DocManager.Inst.ExecuteCmd(new SetPlayPosTickNotification(0));
+                     this.RaisePropertyChanged(nameof(ShowPlayPosHighlight));
+                     this.RaisePropertyChanged(nameof(IsPlaying));
++                    this.RaisePropertyChanged(nameof(ShowPlayPosLine));
+                 }
+             } else if (cmd is SeekPlayPosTickNotification ||
+                 cmd is SetPlayPosTickNotification) {
+diff --git a/OpenUtau/Views/MainWindow.axaml b/OpenUtau/Views/MainWindow.axaml
+index 94523d8..3aa1642 100644
+--- a/OpenUtau/Views/MainWindow.axaml
++++ b/OpenUtau/Views/MainWindow.axaml
+@@ -29,8 +29,8 @@
+             <MenuItem Header="{DynamicResource menu.file.openrecent}" ItemsSource="{Binding OpenRecentMenuItems}" Classes="MenuItemWithSubMenu"/>
+             <MenuItem Header="{DynamicResource menu.file.openprojectlocation}" Click="OnMenuOpenProjectLocation"/>
+             <MenuItem Header="-" Height="1"/>
+-            <MenuItem Header="{DynamicResource menu.file.save}" InputGesture="Ctrl+S" Click="OnMenuSave"/>
+-            <MenuItem Header="{DynamicResource menu.file.saveas}"  InputGesture="Ctrl+Shift+S" Click="OnMenuSaveAs"/>
++            <MenuItem Name="SaveMenuItem" Header="{DynamicResource menu.file.save}" InputGesture="Ctrl+S" Click="OnMenuSave"/>
++            <MenuItem Name="SaveAsMenuItem" Header="{DynamicResource menu.file.saveas}"  InputGesture="Ctrl+Shift+S" Click="OnMenuSaveAs"/>
+             <MenuItem Header="-" Height="1"/>
+             <MenuItem Header="{DynamicResource menu.file.importtracks}" Click="OnMenuImportTracks"/>
+             <MenuItem Header="{DynamicResource menu.file.importaudio}" Click="OnMenuImportAudio"/>
+@@ -247,7 +247,8 @@
+                   <Path Fill="{Binding $parent.Foreground}" VerticalAlignment="Center" HorizontalAlignment="Center"
+                         Data="M 0 0 L 2 0 L 2 9 L 0 9 Z M 2 4.5 L 7 0 L 7 9 Z"/>
+                 </Button>
+-                <Button Click="OnPlayOrPause">
++                <Button Name="PlayButton" Click="OnPlayOrPause"
++                        IsEnabled="{Binding !PlaybackViewModel.UsesExternalTransport}">
+                   <Path Fill="{Binding $parent.Foreground}" VerticalAlignment="Center" HorizontalAlignment="Center"
+                         Data="M 0 0 L 7 6.5 L 0 13 Z"/>
+                 </Button>
+@@ -354,7 +355,7 @@
+                        Canvas.Top="0" Width="1"
+                        Height="{Binding $parent.Bounds.Height, Mode=OneWay}"
+                        ZIndex="99" IsHitTestVisible="False"
+-                       IsVisible="{Binding $parent[Window].DataContext.PlaybackViewModel.IsPlaying}"
++                       IsVisible="{Binding $parent[Window].DataContext.PlaybackViewModel.ShowPlayPosLine}"
+                        Fill="{DynamicResource AccentBrush2}"/>
+             <Rectangle Name="SelectionBox" StrokeThickness="2"
+                       Stroke="{DynamicResource SystemControlForegroundBaseHighBrush}"
+@@ -419,4 +420,4 @@
+       </Carousel>
+     </Grid>
+   </Grid>
+-</Window>
+\ No newline at end of file
++</Window>
+diff --git a/OpenUtau/Views/MainWindow.axaml.cs b/OpenUtau/Views/MainWindow.axaml.cs
+index e895c1d..8be8ad1 100644
+--- a/OpenUtau/Views/MainWindow.axaml.cs
++++ b/OpenUtau/Views/MainWindow.axaml.cs
+@@ -64,6 +64,11 @@ public MainWindow() {
+                 // give the viewmodel a way to prompt/save using the view's existing method
+                 AskIfSaveAndContinue = AskIfSaveAndContinue
+             };
++            if (IsPluginSession) {
++                SaveMenuItem.Header = "Saved automatically with the DAW project";
++                SaveAsMenuItem.Header = "Export USTX Copy…";
++                ToolTip.SetTip(PlayButton, "Use the DAW transport in plug-in mode");
++            }
+ 
+             viewModel.NewProject();
+             viewModel.AddTempoChangeCmd = ReactiveCommand.Create<int>(tick => AddTempoChange(tick));
+@@ -105,10 +110,12 @@ public MainWindow() {
+             DocManager.Inst.AddSubscriber(this);
+ 
+             Log.Information("Main window checking Update.");
+-            UpdaterDialog.CheckForUpdate(
+-                dialog => dialog.Show(this),
+-                () => (Application.Current?.ApplicationLifetime as IControlledApplicationLifetime)?.Shutdown(),
+-                TaskScheduler.FromCurrentSynchronizationContext());
++            if (Environment.GetEnvironmentVariable("OPENUTAU_VST_SESSION") != "1") {
++                UpdaterDialog.CheckForUpdate(
++                    dialog => dialog.Show(this),
++                    () => (Application.Current?.ApplicationLifetime as IControlledApplicationLifetime)?.Shutdown(),
++                    TaskScheduler.FromCurrentSynchronizationContext());
++            }
+             Log.Information("Created main window.");
+             this.Cursor = null;
+         }
+@@ -291,6 +298,16 @@ void OnMenuOpenProjectLocation(object sender, RoutedEventArgs args) {
+ 
+         async void OnMenuSave(object sender, RoutedEventArgs args) => await Save();
+         public async Task Save() {
++            if (IsPluginSession) {
++                if (viewModel.ProjectSaved) {
++                    viewModel.SaveProject();
++                }
++                DocManager.Inst.ExecuteCmd(new ProgressBarNotification(
++                    0, viewModel.ProjectSaved
++                        ? "DAW state saved automatically; USTX copy updated."
++                        : "DAW state is saved automatically. Use Export USTX Copy for interchange or backup."));
++                return;
++            }
+             if (!viewModel.ProjectSaved) {
+                 await SaveAs();
+             } else {
+@@ -310,6 +327,9 @@ async Task SaveAs() {
+             }
+         }
+ 
++        private static bool IsPluginSession =>
++            Environment.GetEnvironmentVariable("OPENUTAU_VST_SESSION") == "1";
++
+         void OnMenuSaveTemplate(object sender, RoutedEventArgs args) {
+             var project = DocManager.Inst.Project;
+             var dialog = new TypeInDialog();
+@@ -791,12 +811,27 @@ void OnKeyDown(object sender, KeyEventArgs args) {
+             }
+ 
+             var tracksVm = viewModel.TracksViewModel;
++            bool isEditorShortcut = args.KeyModifiers == cmdKey
++                || (IsPluginSession && OS.IsMacOS()
++                    && args.KeyModifiers == KeyModifiers.Control);
++            bool isEditorShiftShortcut = args.KeyModifiers == (cmdKey | KeyModifiers.Shift)
++                || (IsPluginSession && OS.IsMacOS()
++                    && args.KeyModifiers == (KeyModifiers.Control | KeyModifiers.Shift));
+ 
+             if (args.KeyModifiers == KeyModifiers.None) {
+                 args.Handled = true;
+                 switch (args.Key) {
+                     case Key.Delete: viewModel.TracksViewModel.DeleteSelectedParts(); break;
+-                    case Key.Space: PlayOrPause(); break;
++                    case Key.Space:
++                        if (IsPluginSession) {
++                            // The embedded editor has no independent transport.
++                            // Leave Space unhandled so the VST wrapper/DAW can
++                            // use its normal Play/Stop shortcut.
++                            args.Handled = false;
++                        } else {
++                            PlayOrPause();
++                        }
++                        break;
+                     case Key.Home: viewModel.PlaybackViewModel.MovePlayPos(0); break;
+                     case Key.End:
+                         if (viewModel.TracksViewModel.Parts.Count > 0) {
+@@ -821,7 +856,7 @@ void OnKeyDown(object sender, KeyEventArgs args) {
+                         args.Handled = false;
+                         break;
+                 }
+-            } else if (args.KeyModifiers == cmdKey) {
++            } else if (isEditorShortcut) {
+                 args.Handled = true;
+                 switch (args.Key) {
+                     case Key.A: viewModel.TracksViewModel.SelectAllParts(); break;
+@@ -859,7 +894,7 @@ void OnKeyDown(object sender, KeyEventArgs args) {
+                         args.Handled = false;
+                         break;
+                 }
+-            } else if (args.KeyModifiers == (cmdKey | KeyModifiers.Shift)) {
++            } else if (isEditorShiftShortcut) {
+                 args.Handled = true;
+                 switch (args.Key) {
+                     case Key.Z: viewModel.Redo(); break;
+@@ -871,6 +906,13 @@ void OnKeyDown(object sender, KeyEventArgs args) {
+             }
+         }
+ 
++        // The VST embeds this window's Content in an EmbeddableControlRoot,
++        // so the detached Window is no longer a routed-event ancestor. Keep
++        // one public bridge to the existing shortcut table instead of
++        // duplicating editor commands in the plug-in host.
++        public void HandleEmbeddedKeyDown(object sender, KeyEventArgs args) =>
++            OnKeyDown(sender, args);
++
+         void OnPointerPressed(object? sender, PointerPressedEventArgs args) {
+             if (!PianoRollContainer.IsPointerOver && !args.Handled && args.ClickCount == 1) {
+                 this.Focus();
+diff --git a/OpenUtau.Core/Render/VstRenderAdapter.cs b/OpenUtau.Core/Render/VstRenderAdapter.cs
+new file mode 100644
+index 0000000..836c41b
+--- /dev/null
++++ b/OpenUtau.Core/Render/VstRenderAdapter.cs
+@@ -0,0 +1,45 @@
++using System;
++using System.Threading;
++using System.Threading.Tasks;
++using OpenUtau.Core.Ustx;
++
++namespace OpenUtau.Core.Render {
++    public static class VstRenderAdapter {
++        public const int SampleRate = 44100;
++        public const int Channels = 2;
++
++        public static void PrepareProject(UProject project) {
++            if (project == null) throw new ArgumentNullException(nameof(project));
++            project.Validate(new ValidateOptions {
++                SynchronousPhonemizer = true,
++            });
++        }
++
++        public static float[] RenderFrames(
++                UProject project, long startFrame, int frameCount,
++                CancellationToken cancellationToken = default,
++                bool prepareProject = true) {
++            if (project == null) throw new ArgumentNullException(nameof(project));
++            if (startFrame < 0) throw new ArgumentOutOfRangeException(nameof(startFrame));
++            if (frameCount < 0) throw new ArgumentOutOfRangeException(nameof(frameCount));
++            if (frameCount == 0) return Array.Empty<float>();
++            if (prepareProject) PrepareProject(project);
++            var startMs = startFrame * 1000.0 / SampleRate;
++            var endMs = (startFrame + frameCount) * 1000.0 / SampleRate;
++            var startTick = project.timeAxis.MsPosToTickPos(startMs);
++            var endTick = project.timeAxis.MsPosToTickPos(endMs) + 1;
++            CancellationTokenSource renderCancellation = null;
++            using var cancellationRegistration = cancellationToken.Register(
++                () => Volatile.Read(ref renderCancellation)?.Cancel());
++            var renderer = new RenderEngine(
++                project, startTick, endTick, notifications: false);
++            var (mix, _) = renderer.RenderMixdown(
++                TaskScheduler.Default, ref renderCancellation, wait: true);
++            cancellationToken.ThrowIfCancellationRequested();
++            var result = new float[checked(frameCount * Channels)];
++            var samplePosition = checked((int)(startFrame * Channels));
++            mix.Mix(samplePosition, result, 0, result.Length);
++            return result;
++        }
++    }
++}

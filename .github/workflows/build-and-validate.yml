@@ -1,0 +1,78 @@
+name: Build and validate
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  container-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - run: docker compose build dev
+      - run: docker compose run --rm dev
+
+  windows-vst3:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - shell: pwsh
+        run: ./scripts/ci-windows.ps1
+      - shell: pwsh
+        run: ./scripts/package-windows.ps1
+      - shell: pwsh
+        run: |
+          $smoke = Get-ChildItem .build/windows -Recurse `
+            -Filter "OpenUtau DAW smoke host.exe" | Select-Object -First 1
+          if ($null -eq $smoke) { throw "Packaged-editor smoke host was not built." }
+          $module = "artifacts/windows-x64/OpenUtau DAW.vst3/Contents/x86_64-win/OpenUtau DAW.vst3"
+          if (!(Test-Path $module)) { throw "Packaged VST3 module was not found." }
+          $env:OPENUTAU_VST_TEST_CREATE_EDITOR = "1"
+          & $smoke.FullName $module
+          if ($LASTEXITCODE -ne 0) { throw "Embedded Windows editor smoke test failed." }
+          Remove-Item Env:OPENUTAU_VST_TEST_CREATE_EDITOR
+      - shell: pwsh
+        run: |
+          git clone --depth 1 --recursive https://github.com/steinbergmedia/vst3sdk.git .build/vst3sdk
+          cmake -S .build/vst3sdk -B .build/vst3sdk-build -A x64 -DSMTG_CREATE_PLUGIN_LINK=0
+          cmake --build .build/vst3sdk-build --config Release --target validator
+          $validator = Get-ChildItem .build/vst3sdk-build -Recurse -Filter validator.exe | Select-Object -First 1
+          if ($null -eq $validator) { throw "Steinberg validator executable was not built." }
+          & $validator.FullName "artifacts/windows-x64/OpenUtau DAW.vst3"
+          if ($LASTEXITCODE -ne 0) { throw "Steinberg VST3 validation failed." }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OpenUtau-DAW-windows-x64
+          path: artifacts/OpenUtau-DAW-windows-x64.zip
+
+  fl-studio-e2e:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: [self-hosted, windows, x64, fl-studio]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - shell: pwsh
+        run: ./scripts/package-windows.ps1
+      - shell: pwsh
+        run: |
+          Copy-Item "artifacts/windows-x64/OpenUtau DAW.vst3" `
+            "$env:CommonProgramFiles/VST3/OpenUtau DAW.vst3" -Recurse -Force
+          ./scripts/fl-studio-e2e.ps1 `
+            -FlStudioExe $env:FL_STUDIO_EXE `
+            -FixtureFlp "tests/fl-studio/OpenUtauVst.e2e.flp" `
+            -ExpectedWav "tests/fl-studio/OpenUtauVst.expected.wav" `
+            -OutputDirectory "artifacts/fl-studio-e2e" `
+            -PluginBundle "artifacts/windows-x64/OpenUtau DAW.vst3"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fl-studio-e2e-output
+          path: artifacts/fl-studio-e2e

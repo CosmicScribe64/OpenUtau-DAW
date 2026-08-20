@@ -1,0 +1,5 @@
+.build/
+artifacts/
+**/bin/
+**/obj/
+**/.avalonia-build-tasks/
