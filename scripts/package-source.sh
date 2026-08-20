@@ -53,11 +53,14 @@ git -C "$juce_source" archive --format=tar --prefix="$prefix/third_party/JUCE/" 
   echo "OpenUtau commit: $upstream_commit"
   echo "JUCE 8.0.15 commit: $juce_commit"
 } > "$staging/$prefix/SOURCE-BUILD-INFO.txt"
-reference_time="$staging/$prefix/LICENSE"
-find "$staging" -exec touch -r "$reference_time" {} +
-
-COPYFILE_DISABLE=1 tar --format pax --uid 0 --gid 0 --uname root --gname root \
-  -cf - -C "$staging" "$prefix" | gzip -n -9 > "$archive"
+source_root="$staging/$prefix"
+git init -q "$source_root"
+git -C "$source_root" add -f .
+GIT_AUTHOR_DATE="2000-01-01T00:00:00Z" \
+GIT_COMMITTER_DATE="2000-01-01T00:00:00Z" \
+  git -C "$source_root" -c user.name="OpenUtau DAW release" \
+  -c user.email="release@invalid.example" commit -qm "Corresponding source"
+git -C "$source_root" archive --format=tar --prefix="$prefix/" HEAD | gzip -n -9 > "$archive"
 (cd "$(dirname "$archive")" && shasum -a 256 "$(basename "$archive")" > "$(basename "$checksum")")
 
 for required in \
