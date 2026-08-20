@@ -37,7 +37,8 @@ CTest result: **6/6 passed, 0 failed**.
 
 ## Current macOS artifact
 
-`artifacts/OpenUtau-DAW-macos-arm64.zip` is an arm64 release-candidate package
+`artifacts/OpenUtau-DAW-v0.1.0-alpha.1-macos-arm64.zip` is an arm64
+release-candidate package
 whose VST3 passes strict deep code-signature verification with its development
 ad-hoc signature. On 2026-08-19 the native module was rebuilt from the current
 source in a new CMake build directory using AppleClang and pinned JUCE 8.0.15;
@@ -46,6 +47,12 @@ The exact archive SHA-256 is recorded in its sibling `.zip.sha256` file rather
 than embedded here, which avoids a self-referential package checksum. The
 native module SHA-256 is
 `56404c9f0afb02948a584ce1c36b4b1bc08b2d957fbd0542aa6d8a44a736145b`.
+
+The complete corresponding-source archive contains this repository, the
+pinned OpenUtau tree, and the pinned JUCE 8.0.15 tree. Two independent archive
+builds from the same commit produced the same bytes, and a sampled JUCE source
+file matched its pinned Git blob byte-for-byte. The archive's exact SHA-256 is
+kept in its sibling `.tar.gz.sha256` file.
 
 `scripts/verify-macos-package.sh` is the reproducible workspace-only package
 gate: it validates the portable archive checksum, internal manifest, strict
@@ -225,9 +232,10 @@ The executable handoff checklist is [release-checklist.md](release-checklist.md)
 2. Sign with an appropriate Apple Developer ID, notarize, staple, and test on a
    clean Mac. The current local package is ad-hoc signed only.
 3. Complete crash/hang/missing-dependency recovery in real FL Studio.
-4. Create a clean, versioned source release and run the signed draft-release
-   workflow with repository signing/notarization secrets;
-   the working root repository has not yet been committed/tagged.
+4. Configure a GitHub remote and repository signing/notarization secrets, make
+   a signed version tag, and run the draft-release workflow. The source is
+   committed locally, but this checkout has no remote and this Mac has no
+   Developer ID signing identity.
 5. For Windows support, produce and sign the x64 package, run Steinberg's
    validator, and complete the licensed FL Studio runner with checked-in
    FLP/reference-WAV fixtures. Until then, Windows is not a verified target.

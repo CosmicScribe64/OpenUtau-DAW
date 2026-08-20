@@ -6,9 +6,12 @@ as a completed public VST3 release. Check an item only with retained evidence
 
 ## Source and packages
 
-- [ ] A clean, versioned source commit and signed/tagged release exist.
-- [ ] `docker compose run --rm dev ./scripts/ci.sh` passes for that commit.
-- [ ] macOS native VST3 is rebuilt from that commit on a Mac with CMake; do not
+- [x] A clean source commit and reproducible complete corresponding-source
+  archive exist (local public-alpha candidate, 2026-08-19).
+- [ ] A signed version tag and GitHub draft release exist.
+- [x] `docker compose run --rm dev ./scripts/ci.sh` passes for the candidate
+  commit (2026-08-19).
+- [x] macOS native VST3 is rebuilt from the candidate on a Mac with CMake; do not
   use `SKIP_NATIVE_BUILD=1` for a public candidate.
 - [x] `scripts/verify-macos-package.sh` passes the clean-rebuilt local archive
   (ad-hoc-signed candidate, 2026-08-19).
