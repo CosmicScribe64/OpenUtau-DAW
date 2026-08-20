@@ -35,4 +35,14 @@ if ! grep -REq 'git -C .*vst3sdk checkout [0-9a-f]{40}$' .github/workflows; then
   exit 1
 fi
 
+for safe_directory in \
+  /workspace \
+  /workspace/upstream \
+  /workspace/.git/modules/upstream; do
+  if ! grep -Fq "safe.directory $safe_directory" docker/dev.Dockerfile; then
+    echo "Docker image does not trust expected Git path: $safe_directory" >&2
+    exit 1
+  fi
+done
+
 echo "GitHub workflow pinning policy tests passed."

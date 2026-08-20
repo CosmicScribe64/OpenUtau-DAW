@@ -11,11 +11,12 @@ RUN apt-get update \
 
 WORKDIR /workspace
 # GitHub's Linux checkout is bind-mounted from runner uid 1001 while this
-# disposable build container runs as root. Trust only the two expected mounted
-# repositories so Git can inspect the pinned submodule without changing host
-# configuration or accepting arbitrary paths.
+# disposable build container runs as root. Trust only the expected mounted
+# repositories and the submodule's separate metadata directory so Git can
+# inspect and locally clone it without changing host configuration.
 RUN git config --system --add safe.directory /workspace \
-    && git config --system --add safe.directory /workspace/upstream
+    && git config --system --add safe.directory /workspace/upstream \
+    && git config --system --add safe.directory /workspace/.git/modules/upstream
 COPY scripts/ci.sh /usr/local/bin/openutau-vst-ci
 RUN chmod +x /usr/local/bin/openutau-vst-ci
 CMD ["openutau-vst-ci"]
