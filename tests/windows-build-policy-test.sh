@@ -53,6 +53,18 @@ if ! grep -Fq 'windows-vst3-package-smoke:' .github/workflows/build-and-validate
   echo "Windows packaging smoke must run independently from the exhaustive test job." >&2
   exit 1
 fi
+if ! grep -Fq -- '- windows-editor' .github/workflows/build-and-validate.yml; then
+  echo "Windows editor smoke must be independently selectable for quota-conscious iteration." >&2
+  exit 1
+fi
+if ! grep -Fq "inputs.scope == 'windows-editor'" .github/workflows/build-and-validate.yml; then
+  echo "Windows package smoke does not honor the focused workflow scope." >&2
+  exit 1
+fi
+if grep -Fq -- '- "**"' .github/workflows/build-and-validate.yml; then
+  echo "Feature-branch pushes must not consume the full hosted validation matrix." >&2
+  exit 1
+fi
 if ! grep -Fq '0x$hexExitCode' scripts/smoke-windows-package.ps1; then
   echo "Windows package smoke does not report the native crash exit code." >&2
   exit 1

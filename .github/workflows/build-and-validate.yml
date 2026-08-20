@@ -3,15 +3,27 @@ name: Build and validate
 on:
   push:
     branches:
-      - "**"
+      - main
   pull_request:
   workflow_dispatch:
+    inputs:
+      scope:
+        description: Validation scope
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - container
+          - windows-editor
+          - fl-studio-e2e
 
 permissions:
   contents: read
 
 jobs:
   container-tests:
+    if: github.event_name != 'workflow_dispatch' || inputs.scope == 'all' || inputs.scope == 'container'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -22,6 +34,7 @@ jobs:
       - run: docker compose run --rm dev
 
   linux-vst3:
+    if: github.event_name != 'workflow_dispatch' || inputs.scope == 'all'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -38,6 +51,7 @@ jobs:
             artifacts/OpenUtau-DAW-linux-x64.zip.sha256
 
   windows-vst3-tests:
+    if: github.event_name != 'workflow_dispatch' || inputs.scope == 'all'
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -51,6 +65,7 @@ jobs:
         run: ./scripts/ci-windows.ps1
 
   windows-vst3-package-smoke:
+    if: github.event_name != 'workflow_dispatch' || inputs.scope == 'all' || inputs.scope == 'windows-editor'
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -98,6 +113,7 @@ jobs:
             artifacts/OpenUtau-DAW-windows-x64.zip.sha256
 
   macos-intel-vst3:
+    if: github.event_name != 'workflow_dispatch' || inputs.scope == 'all'
     runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -128,7 +144,7 @@ jobs:
             artifacts/OpenUtau-DAW-macos-x64.zip.sha256
 
   fl-studio-e2e:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && inputs.scope == 'fl-studio-e2e'
     runs-on: [self-hosted, windows, x64, fl-studio]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

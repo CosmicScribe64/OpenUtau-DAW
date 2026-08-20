@@ -45,30 +45,48 @@ public static class EntryPoints {
     [UnmanagedCallersOnly(EntryPoint = "OpenUtauVstEditorCreate",
         CallConvs = [typeof(CallConvCdecl)])]
     public static nint Create(int width, int height) {
+        EmbeddableControlRoot? root = null;
+        var renderingStarted = false;
         try {
             EnsureInitialized();
-            var root = new EmbeddableControlRoot {
+            Log.Information("Creating VST embeddable root at {Width}x{Height}.",
+                width, height);
+            root = new EmbeddableControlRoot {
                 Width = Math.Max(1, width),
                 Height = Math.Max(1, height),
                 Focusable = true,
             };
+            Log.Information("Created VST embeddable root.");
             root.Content = BuildOpenUtauView();
+            Log.Information("Attached OpenUtau content to VST embeddable root.");
             EmbeddedShortcutRouter.Attach(
                 root,
                 (sender, args) => mainWindow?.HandleEmbeddedKeyDown(sender!, args));
             root.Prepare();
-            root.StartRendering();
-            root.Focus();
-            var handle = root.TryGetPlatformHandle()?.Handle ?? nint.Zero;
+            Log.Information("Prepared VST embeddable root.");
+            var platformHandle = root.TryGetPlatformHandle();
+            var handle = platformHandle?.Handle ?? nint.Zero;
             if (handle == nint.Zero) {
-                root.Dispose();
-                return nint.Zero;
+                throw new InvalidOperationException(
+                    "Avalonia prepared the embedded editor without a native platform handle.");
             }
+            Log.Information(
+                "Prepared VST native child {Descriptor} 0x{Handle:X}.",
+                platformHandle?.HandleDescriptor ?? "unknown", handle.ToInt64());
+            // JUCE parents the returned child immediately after this call. Do
+            // not force focus while the native view is still an unattached,
+            // hidden HWND; the DAW owns activation and keyboard focus.
+            root.StartRendering();
+            renderingStarted = true;
+            Log.Information("Started rendering VST native child 0x{Handle:X}.",
+                handle.ToInt64());
             lock (Gate) {
                 Roots.Add(handle, root);
             }
             return handle;
         } catch (Exception ex) {
+            if (root is not null) TryDisposeRoot(root, renderingStarted);
+            Log.Error(ex, "Failed to create the embedded VST editor.");
             SetLastError(ex.ToString());
             return nint.Zero;
         }
@@ -228,13 +246,36 @@ public static class EntryPoints {
     [UnmanagedCallersOnly(EntryPoint = "OpenUtauVstEditorDestroy",
         CallConvs = [typeof(CallConvCdecl)])]
     public static void Destroy(nint handle) {
-        EmbeddableControlRoot? root = null;
-        lock (Gate) {
-            if (Roots.Remove(handle, out var found)) root = found;
+        try {
+            EmbeddableControlRoot? root = null;
+            lock (Gate) {
+                if (Roots.Remove(handle, out var found)) root = found;
+            }
+            if (root is null) return;
+            TryDisposeRoot(root, renderingStarted: true);
+        } catch (Exception ex) {
+            // An exception must never escape an UnmanagedCallersOnly method
+            // into a DAW host process.
+            Log.Error(ex, "Failed to destroy embedded VST editor 0x{Handle:X}.",
+                handle.ToInt64());
+            SetLastError(ex.ToString());
         }
-        if (root is null) return;
-        root.StopRendering();
-        root.Dispose();
+    }
+
+    private static void TryDisposeRoot(
+            EmbeddableControlRoot root, bool renderingStarted) {
+        if (renderingStarted) {
+            try {
+                root.StopRendering();
+            } catch (Exception ex) {
+                Log.Warning(ex, "Failed to stop VST editor rendering during cleanup.");
+            }
+        }
+        try {
+            root.Dispose();
+        } catch (Exception ex) {
+            Log.Warning(ex, "Failed to dispose VST editor root during cleanup.");
+        }
     }
 
     private static void EnsureInitialized() {
@@ -298,11 +339,14 @@ public static class EntryPoints {
         Log.Information("Building VST editor with {Count} phonemizers",
             PhonemizerFactory.GetAll().Length);
         var window = new MainWindow();
+        Log.Information("Created OpenUtau window shell for VST embedding.");
         var content = window.Content as Control
             ?? throw new InvalidOperationException("OpenUtau MainWindow has no control content.");
         window.Content = null;
         content.DataContext = window.DataContext;
+        Log.Information("Detached OpenUtau content from its window shell.");
         window.InitProject();
+        Log.Information("Initialized OpenUtau VST project.");
         if (window.DataContext is MainWindowViewModel viewModel) {
             viewModel.PlaybackViewModel.SetExternalTransport(
                 () => Volatile.Read(ref hostPlaying) != 0);
