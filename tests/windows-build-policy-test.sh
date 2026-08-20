@@ -37,6 +37,10 @@ if ! grep -Fq 'WindowsBase.dll' scripts/package-windows.ps1; then
   echo "Windows package does not verify its bundled desktop runtime." >&2
   exit 1
 fi
+if ! grep -Fq 'Package manifest tool restore' scripts/package-windows.ps1; then
+  echo "Windows packaging is not independent of the full CI restore step." >&2
+  exit 1
+fi
 
 for workflow in .github/workflows/build-and-validate.yml .github/workflows/release-candidate.yml; do
   if ! grep -Fq './scripts/smoke-windows-package.ps1' "$workflow"; then

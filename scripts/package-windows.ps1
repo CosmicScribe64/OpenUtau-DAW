@@ -137,6 +137,8 @@ $nugetCache = if ($env:NUGET_PACKAGES) {
     Join-Path ([Environment]::GetFolderPath("UserProfile")) ".nuget/packages"
 }
 $noticeTool = Join-Path $root "bridge/OpenUtau.Vst.PackageManifest/OpenUtau.Vst.PackageManifest.csproj"
+dotnet restore $noticeTool
+Assert-NativeSuccess "Package manifest tool restore" $LASTEXITCODE
 & dotnet run --project $noticeTool --configuration $Configuration --no-restore -- notices `
     $nugetCache `
     (Join-Path $root "third_party/license-overrides.json") `
