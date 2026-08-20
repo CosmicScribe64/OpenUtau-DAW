@@ -60,7 +60,7 @@ corresponding-source archive. Voicebanks are not bundled.
 | --- | --- |
 | macOS arm64 + FL Studio 2026 | Verified public alpha; ad-hoc signed and not Apple-notarized |
 | macOS Intel x64 | Automated native package; real Intel DAW acceptance pending |
-| Windows x64 + FL Studio | Experimental alpha; native/audio and packaged-editor smoke tests pass, while the Steinberg release validator and licensed Windows FL evidence remain pending |
+| Windows x64 + FL Studio | Experimental alpha; native/audio, packaged-editor, and Steinberg validator tests pass; licensed Windows FL evidence remains pending |
 | Linux x64 + native VST3 DAWs | Experimental package; companion editor window, native DAW acceptance pending |
 | Other VST3 DAWs | Expected to use the standard VST3 contract, but not yet acceptance-tested |
 
