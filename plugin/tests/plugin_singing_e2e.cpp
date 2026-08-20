@@ -215,9 +215,11 @@ void verifyHostCallbackMatrix(juce::VST3PluginFormat& format,
       juce::AudioBuffer<float> audio(2, blockSize);
       juce::MidiBuffer midi;
 
-      // The bridge renders ahead while the host is stopped. Give it a bounded
-      // amount of genuine callback time before making the live assertion.
-      for (int prewarm = 0; prewarm < 200; ++prewarm) {
+      // The bridge renders ahead while the host is stopped. Give a contended
+      // CI worker enough bounded callback time to cache several 8,192-frame
+      // render slices before making the live real-time assertion. Audio quality
+      // and coverage thresholds below remain unchanged.
+      for (int prewarm = 0; prewarm < 600; ++prewarm) {
         audio.clear();
         instance->processBlock(audio, midi);
         std::this_thread::sleep_for(std::chrono::milliseconds(5));

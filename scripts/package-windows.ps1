@@ -57,33 +57,52 @@ foreach ($required in @(
     }
 }
 
-# Copy only the .NET 8 runtime needed by the two managed components. This
-# avoids installing .NET on an FL Studio user's machine and avoids shipping the
-# much larger SDK that is present on the build runner.
+# Copy only the .NET 8 runtimes needed by the two managed components. The
+# engine uses Microsoft.NETCore.App while the net8.0-windows editor also needs
+# Microsoft.WindowsDesktop.App. This avoids requiring users to install .NET
+# and avoids shipping the much larger SDK that is present on the build runner.
 $dotnetExe = (Get-Command dotnet).Source
 $dotnetRoot = Split-Path -Parent $dotnetExe
-$runtimeVersions = @(& $dotnetExe --list-runtimes | ForEach-Object {
+$runtimeInventory = @(& $dotnetExe --list-runtimes)
+Assert-NativeSuccess ".NET runtime inventory" $LASTEXITCODE
+$coreRuntimeVersions = @($runtimeInventory | ForEach-Object {
     if ($_ -match '^Microsoft\.NETCore\.App (8\.0\.\d+) ') {
         [Version]$Matches[1]
     }
 })
-Assert-NativeSuccess ".NET runtime inventory" $LASTEXITCODE
-if ($runtimeVersions.Count -eq 0) {
-    throw "A Microsoft.NETCore.App 8.0 runtime is required for packaging."
+$desktopRuntimeVersions = @($runtimeInventory | ForEach-Object {
+    if ($_ -match '^Microsoft\.WindowsDesktop\.App (8\.0\.\d+) ') {
+        [Version]$Matches[1]
+    }
+})
+$sharedRuntimeVersions = @($coreRuntimeVersions | Where-Object {
+    $desktopRuntimeVersions -contains $_
+})
+if ($sharedRuntimeVersions.Count -eq 0) {
+    throw "Matching Microsoft.NETCore.App and Microsoft.WindowsDesktop.App 8.0 runtimes are required for packaging."
 }
-$runtimeVersion = ($runtimeVersions | Sort-Object -Descending | Select-Object -First 1).ToString()
-$runtimeSource = Join-Path $dotnetRoot "shared/Microsoft.NETCore.App/$runtimeVersion"
+$runtimeVersion = ($sharedRuntimeVersions | Sort-Object -Descending | Select-Object -First 1).ToString()
+$coreRuntimeSource = Join-Path $dotnetRoot "shared/Microsoft.NETCore.App/$runtimeVersion"
+$desktopRuntimeSource = Join-Path $dotnetRoot "shared/Microsoft.WindowsDesktop.App/$runtimeVersion"
 $fxrSource = Join-Path $dotnetRoot "host/fxr/$runtimeVersion"
-if (!(Test-Path $runtimeSource) -or !(Test-Path $fxrSource)) {
+if (!(Test-Path $coreRuntimeSource) -or
+    !(Test-Path $desktopRuntimeSource) -or
+    !(Test-Path $fxrSource)) {
     throw "Could not locate the selected private .NET runtime $runtimeVersion."
 }
 $privateRuntime = Join-Path $embeddedPublish "dotnet"
 New-Item (Join-Path $privateRuntime "host/fxr/$runtimeVersion") -ItemType Directory -Force | Out-Null
 New-Item (Join-Path $privateRuntime "shared/Microsoft.NETCore.App/$runtimeVersion") -ItemType Directory -Force | Out-Null
+New-Item (Join-Path $privateRuntime "shared/Microsoft.WindowsDesktop.App/$runtimeVersion") -ItemType Directory -Force | Out-Null
 Copy-Item $dotnetExe (Join-Path $privateRuntime "dotnet.exe")
 Copy-Item (Join-Path $fxrSource "*") (Join-Path $privateRuntime "host/fxr/$runtimeVersion") -Recurse
-Copy-Item (Join-Path $runtimeSource "*") `
+Copy-Item (Join-Path $coreRuntimeSource "*") `
     (Join-Path $privateRuntime "shared/Microsoft.NETCore.App/$runtimeVersion") -Recurse
+Copy-Item (Join-Path $desktopRuntimeSource "*") `
+    (Join-Path $privateRuntime "shared/Microsoft.WindowsDesktop.App/$runtimeVersion") -Recurse
+if (!(Test-Path (Join-Path $privateRuntime "shared/Microsoft.WindowsDesktop.App/$runtimeVersion/WindowsBase.dll"))) {
+    throw "Private .NET runtime is missing the Windows desktop framework."
+}
 foreach ($notice in @("LICENSE.txt", "ThirdPartyNotices.txt")) {
     $noticePath = Join-Path $dotnetRoot $notice
     if (!(Test-Path $noticePath)) { throw "Private .NET runtime notice is missing: $noticePath" }

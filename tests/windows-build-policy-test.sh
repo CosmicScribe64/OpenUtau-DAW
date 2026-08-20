@@ -29,6 +29,15 @@ for script in scripts/ci-windows.ps1 scripts/package-windows.ps1; do
   fi
 done
 
+if ! grep -Fq 'shared/Microsoft.WindowsDesktop.App/$runtimeVersion' scripts/package-windows.ps1; then
+  echo "Windows package does not bundle the desktop runtime required by the embedded editor." >&2
+  exit 1
+fi
+if ! grep -Fq 'WindowsBase.dll' scripts/package-windows.ps1; then
+  echo "Windows package does not verify its bundled desktop runtime." >&2
+  exit 1
+fi
+
 for workflow in .github/workflows/build-and-validate.yml .github/workflows/release-candidate.yml; do
   if ! grep -Fq -- '-Filter "plugin_smoke_tests.exe"' "$workflow"; then
     echo "$workflow does not locate the actual Windows smoke-host target." >&2
