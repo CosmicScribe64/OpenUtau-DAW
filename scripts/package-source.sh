@@ -53,9 +53,11 @@ git -C "$juce_source" archive --format=tar --prefix="$prefix/third_party/JUCE/" 
   echo "OpenUtau commit: $upstream_commit"
   echo "JUCE 8.0.15 commit: $juce_commit"
 } > "$staging/$prefix/SOURCE-BUILD-INFO.txt"
-touch -r "$staging/$prefix/LICENSE" "$staging/$prefix/SOURCE-BUILD-INFO.txt"
+reference_time="$staging/$prefix/LICENSE"
+find "$staging" -exec touch -r "$reference_time" {} +
 
-tar -cf - -C "$staging" "$prefix" | gzip -n -9 > "$archive"
+COPYFILE_DISABLE=1 tar --format pax --uid 0 --gid 0 --uname root --gname root \
+  -cf - -C "$staging" "$prefix" | gzip -n -9 > "$archive"
 (cd "$(dirname "$archive")" && shasum -a 256 "$(basename "$archive")" > "$(basename "$checksum")")
 
 for required in \
