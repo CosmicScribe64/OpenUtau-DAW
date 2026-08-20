@@ -55,4 +55,29 @@ for required_release_text in \
   fi
 done
 
+for amd64_policy in \
+  'image: open-utau-vst-dev:amd64' \
+  'platform: linux/amd64' \
+  'name: open-utau-vst-nuget-cache-amd64' \
+  'name: open-utau-vst-build-cache-amd64'; do
+  if ! grep -Fq "$amd64_policy" docker/compose.amd64.yml; then
+    echo "Local amd64 Docker policy is missing: $amd64_policy" >&2
+    exit 1
+  fi
+done
+if ! grep -Fq 'docker/compose.amd64.yml' scripts/package-linux-amd64-docker.sh; then
+  echo "Linux x64 Docker helper does not use the isolated amd64 override." >&2
+  exit 1
+fi
+if ! grep -Fq 'BUILD_DIRECTORY=/workspace/.build/linux-x64' \
+    scripts/package-linux-amd64-docker.sh; then
+  echo "Linux x64 Docker helper does not pin its CMake cache path." >&2
+  exit 1
+fi
+if ! grep -Fq 'version="${1:?Expected the release version tag.}"' \
+    scripts/package-source.sh; then
+  echo "Source packaging must require an explicit release version." >&2
+  exit 1
+fi
+
 echo "GitHub workflow pinning policy tests passed."

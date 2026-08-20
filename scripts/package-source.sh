@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-version="${1:-v0.1.0-alpha.1}"
+version="${1:?Expected the release version tag.}"
 source_ref="${SOURCE_REF:-HEAD}"
 root="$(cd "$(dirname "$0")/.." && pwd)"
 juce_source="${JUCE_SOURCE_DIR:-$root/.build/macos-arm64/_deps/juce-src}"

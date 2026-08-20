@@ -60,7 +60,7 @@ corresponding-source archive. Voicebanks are not bundled.
 | --- | --- |
 | macOS arm64 + FL Studio 2026 | Verified public alpha; ad-hoc signed and not Apple-notarized |
 | macOS Intel x64 | Automated native package; real Intel DAW acceptance pending |
-| Windows x64 + FL Studio | Experimental alpha; native/audio tests pass, current packaged-editor/Steinberg release gate and licensed FL evidence pending |
+| Windows x64 + FL Studio | Experimental alpha; native/audio and packaged-editor smoke tests pass, while the Steinberg release validator and licensed Windows FL evidence remain pending |
 | Linux x64 + native VST3 DAWs | Experimental package; companion editor window, native DAW acceptance pending |
 | Other VST3 DAWs | Expected to use the standard VST3 contract, but not yet acceptance-tested |
 
@@ -79,6 +79,18 @@ For a short editor-only iteration after the image is built:
 docker compose run --rm dev dotnet run --project \
   bridge/OpenUtau.Vst.EditorHost.Tests --configuration Release
 ```
+
+On an Apple-silicon Mac, a release-shaped Linux x64 package can be built and
+loaded under Docker's amd64 emulation without replacing the normal ARM64
+development image:
+
+```sh
+PACKAGE_VERSION=local ./scripts/package-linux-amd64-docker.sh
+```
+
+This uses separately named Docker image and cache volumes. The command prints
+the exact object names that may be removed after release to reclaim their
+space; it never installs a cross-toolchain or runtime on the host.
 
 The manual **Build and validate** workflow also has `container` and
 `windows-editor` scopes. Feature-branch pushes do not launch the hosted matrix;
