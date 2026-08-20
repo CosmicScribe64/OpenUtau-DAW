@@ -1,0 +1,173 @@
+name: Build and validate
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: Validation scope
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - container
+          - windows-editor
+          - fl-studio-e2e
+
+permissions:
+  contents: read
+
+jobs:
+  container-tests:
+    if: github.event_name != 'workflow_dispatch' || inputs.scope == 'all' || inputs.scope == 'container'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - run: docker compose build dev
+      - run: docker compose run --rm dev
+
+  linux-vst3:
+    if: github.event_name != 'workflow_dispatch' || inputs.scope == 'all'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - run: docker compose build dev
+      - run: docker compose run --rm -e ARCHITECTURE=x64 dev ./scripts/package-linux.sh
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: OpenUtau-DAW-linux-x64
+          path: |
+            artifacts/OpenUtau-DAW-linux-x64.zip
+            artifacts/OpenUtau-DAW-linux-x64.zip.sha256
+
+  windows-vst3-tests:
+    if: github.event_name != 'workflow_dispatch' || inputs.scope == 'all'
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-dotnet@9a946fdbd5fb07b82b2f5a4466058b876ab72bb2 # v5.3.0
+        with:
+          dotnet-version: 8.0.424
+      - shell: pwsh
+        run: ./scripts/ci-windows.ps1
+
+  windows-vst3-package-smoke:
+    if: github.event_name != 'workflow_dispatch' || inputs.scope == 'all' || inputs.scope == 'windows-editor'
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-dotnet@9a946fdbd5fb07b82b2f5a4466058b876ab72bb2 # v5.3.0
+        with:
+          dotnet-version: 8.0.424
+      - shell: pwsh
+        run: ./scripts/package-windows.ps1
+      - shell: pwsh
+        run: cmake --build .build/windows --config Release --target plugin_smoke_tests
+      - name: Open embedded editor from packaged VST3
+        shell: pwsh
+        run: ./scripts/smoke-windows-package.ps1
+      - if: failure()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: windows-editor-smoke-diagnostics
+          if-no-files-found: warn
+          path: .build/windows-smoke-diagnostics
+      - name: Run Steinberg VST3 validator
+        if: github.event_name != 'workflow_dispatch' || inputs.scope == 'all'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          git clone --no-checkout https://github.com/steinbergmedia/vst3sdk.git .build/vst3sdk
+          if ($LASTEXITCODE -ne 0) { throw "Steinberg SDK clone failed." }
+          git -C .build/vst3sdk checkout 3cdf9ca5d1f5b1b21e0a86832aa4abe55607bd96
+          if ($LASTEXITCODE -ne 0) { throw "Steinberg SDK checkout failed." }
+          git -C .build/vst3sdk submodule update --init --recursive
+          if ($LASTEXITCODE -ne 0) { throw "Steinberg SDK submodule checkout failed." }
+          cmake -S .build/vst3sdk -B .build/vst3sdk-build -A x64 -DSMTG_CREATE_PLUGIN_LINK=0
+          if ($LASTEXITCODE -ne 0) { throw "Steinberg validator configure failed." }
+          cmake --build .build/vst3sdk-build --config Release --target validator
+          if ($LASTEXITCODE -ne 0) { throw "Steinberg validator build failed." }
+          $validator = Get-ChildItem .build/vst3sdk-build -Recurse -Filter validator.exe | Select-Object -First 1
+          if ($null -eq $validator) { throw "Steinberg validator executable was not built." }
+          & $validator.FullName "artifacts/windows-x64/OpenUtau DAW.vst3"
+          if ($LASTEXITCODE -ne 0) { throw "Steinberg VST3 validation failed." }
+      - name: Upload Windows package
+        if: github.event_name != 'workflow_dispatch' || inputs.scope == 'all'
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: OpenUtau-DAW-windows-x64
+          path: |
+            artifacts/OpenUtau-DAW-windows-x64.zip
+            artifacts/OpenUtau-DAW-windows-x64.zip.sha256
+
+  macos-intel-vst3:
+    if: github.event_name != 'workflow_dispatch' || inputs.scope == 'all'
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-dotnet@9a946fdbd5fb07b82b2f5a4466058b876ab72bb2 # v5.3.0
+        with:
+          dotnet-version: 8.0.424
+      - name: Build ad-hoc-signed macOS Intel package
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = x86_64
+          ARCHITECTURE=x64 \
+          MANAGED_PUBLISH_MODE=host \
+          PACKAGE_TOOL_MODE=host \
+          BUILD_DIRECTORY="$GITHUB_WORKSPACE/.build/macos-x64-validation" \
+          OUTPUT_DIRECTORY="$GITHUB_WORKSPACE/artifacts/macos-x64-validation" \
+          CODESIGN_IDENTITY="-" \
+          NOTARIZE=0 \
+          ./scripts/package-macos.sh
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: OpenUtau-DAW-macos-x64
+          path: |
+            artifacts/OpenUtau-DAW-macos-x64.zip
+            artifacts/OpenUtau-DAW-macos-x64.zip.sha256
+
+  fl-studio-e2e:
+    if: github.event_name == 'workflow_dispatch' && inputs.scope == 'fl-studio-e2e'
+    runs-on: [self-hosted, windows, x64, fl-studio]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - shell: pwsh
+        run: ./scripts/package-windows.ps1
+      - shell: pwsh
+        run: |
+          Copy-Item "artifacts/windows-x64/OpenUtau DAW.vst3" `
+            "$env:CommonProgramFiles/VST3/OpenUtau DAW.vst3" -Recurse -Force
+          ./scripts/fl-studio-e2e.ps1 `
+            -FlStudioExe $env:FL_STUDIO_EXE `
+            -FixtureFlp "tests/fl-studio/OpenUtauVst.e2e.flp" `
+            -ExpectedWav "tests/fl-studio/OpenUtauVst.expected.wav" `
+            -OutputDirectory "artifacts/fl-studio-e2e" `
+            -PluginBundle "artifacts/windows-x64/OpenUtau DAW.vst3"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: fl-studio-e2e-output
+          path: artifacts/fl-studio-e2e

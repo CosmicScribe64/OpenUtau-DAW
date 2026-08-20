@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\OpenUtau.Vst.Protocol\OpenUtau.Vst.Protocol.csproj" />
+    <ProjectReference Include="..\..\upstream\OpenUtau.Core\OpenUtau.Core.csproj" />
+    <ProjectReference Include="..\..\upstream\OpenUtau.Plugin.Builtin\OpenUtau.Plugin.Builtin.csproj" />
+  </ItemGroup>
+  <!-- The desktop app normally owns these native Worldline assets. The VST
+       engine is a separate executable, so it must carry the matching runtime
+       itself. Framework-dependent test builds retain the RID hierarchy used
+       by .NET's native-library resolver; self-contained publishes copy only
+       their selected platform beside the engine. -->
+  <ItemGroup Condition="'$(RuntimeIdentifier)' == ''">
+    <None Include="..\..\upstream\runtimes\**"
+          CopyToOutputDirectory="PreserveNewest" LinkBase="runtimes\" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'win-x64'">
+    <None Include="..\..\upstream\runtimes\win-x64\native\**"
+          CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" LinkBase="." />
+  </ItemGroup>
+  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'win-arm64'">
+    <None Include="..\..\upstream\runtimes\win-arm64\native\**"
+          CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" LinkBase="." />
+  </ItemGroup>
+  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'linux-x64'">
+    <None Include="..\..\upstream\runtimes\linux-x64\native\**"
+          CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" LinkBase="." />
+  </ItemGroup>
+  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'linux-arm64'">
+    <None Include="..\..\upstream\runtimes\linux-arm64\native\**"
+          CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" LinkBase="." />
+  </ItemGroup>
+  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'osx-x64' Or '$(RuntimeIdentifier)' == 'osx-arm64'">
+    <None Include="..\..\upstream\runtimes\osx\native\**"
+          CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" LinkBase="." />
+  </ItemGroup>
+</Project>

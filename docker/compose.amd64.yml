@@ -1,0 +1,18 @@
+services:
+  dev:
+    # Keep the emulated x64 image separate from the native Apple-silicon
+    # development image. This lets an ARM Mac exercise the Linux x64 package
+    # without making subsequent normal `docker compose` runs use emulation.
+    image: open-utau-vst-dev:amd64
+    platform: linux/amd64
+    volumes:
+      - .:/workspace
+      - nuget-cache-amd64:/root/.nuget/packages
+      - build-cache-amd64:/workspace/.build
+      - macos-dotnet-runtime-cache:/opt/openutau-macos-runtime-cache
+
+volumes:
+  nuget-cache-amd64:
+    name: open-utau-vst-nuget-cache-amd64
+  build-cache-amd64:
+    name: open-utau-vst-build-cache-amd64

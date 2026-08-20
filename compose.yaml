@@ -1,0 +1,17 @@
+services:
+  dev:
+    build:
+      context: .
+      dockerfile: docker/dev.Dockerfile
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+      - nuget-cache:/root/.nuget/packages
+      - build-cache:/workspace/.build
+      - macos-dotnet-runtime-cache:/opt/openutau-macos-runtime-cache
+    command: ["./scripts/ci.sh"]
+
+volumes:
+  nuget-cache:
+  build-cache:
+  macos-dotnet-runtime-cache:
