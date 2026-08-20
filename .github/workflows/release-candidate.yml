@@ -42,8 +42,16 @@ jobs:
           dotnet-version: 8.0.30
       - name: Validate release inputs
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          case "$RELEASE_TAG" in
+            *[!A-Za-z0-9._-]*|'')
+              echo "Invalid release tag: $RELEASE_TAG" >&2
+              exit 1
+              ;;
+          esac
           test -f "docs/releases/$RELEASE_TAG.md"
           test -n "$MACOS_CERTIFICATE_P12_BASE64"
           test -n "$MACOS_CERTIFICATE_PASSWORD"
@@ -53,27 +61,29 @@ jobs:
           test -n "$NOTARY_API_ISSUER_ID"
           test "$(uname -m)" = arm64
           cmake --version
+          ./scripts/validate-github-release-tag.sh \
+            "$RELEASE_TAG" "$GITHUB_SHA" "$GITHUB_REF" "$GITHUB_REPOSITORY"
       - name: Import Developer ID certificate
         shell: bash
         run: |
           set -euo pipefail
-          certificate="$RUNNER_TEMP/openutau-release.p12"
-          keychain="$RUNNER_TEMP/openutau-signing.keychain-db"
-          printf '%s' "$MACOS_CERTIFICATE_P12_BASE64" | base64 --decode > "$certificate"
-          security create-keychain -p openutau-temporary-keychain "$keychain"
-          security set-keychain-settings -lut 21600 "$keychain"
-          security unlock-keychain -p openutau-temporary-keychain "$keychain"
-          security import "$certificate" -P "$MACOS_CERTIFICATE_PASSWORD" \
-            -A -t cert -f pkcs12 -k "$keychain"
+          release_certificate="$RUNNER_TEMP/openutau-release.p12"
+          release_keychain="$RUNNER_TEMP/openutau-signing.keychain-db"
+          printf '%s' "$MACOS_CERTIFICATE_P12_BASE64" | base64 -D > "$release_certificate"
+          security create-keychain -p openutau-temporary-keychain "$release_keychain"
+          security set-keychain-settings -lut 21600 "$release_keychain"
+          security unlock-keychain -p openutau-temporary-keychain "$release_keychain"
+          security import "$release_certificate" -P "$MACOS_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$release_keychain"
           security set-key-partition-list -S apple-tool:,apple:,codesign: \
-            -s -k openutau-temporary-keychain "$keychain"
-          security list-keychain -d user -s "$keychain"
+            -s -k openutau-temporary-keychain "$release_keychain"
+          security list-keychain -d user -s "$release_keychain"
       - name: Build, sign, notarize, and verify macOS package
         shell: bash
         run: |
           set -euo pipefail
           notary_key="$RUNNER_TEMP/AuthKey.p8"
-          printf '%s' "$NOTARY_API_KEY_P8_BASE64" | base64 --decode > "$notary_key"
+          printf '%s' "$NOTARY_API_KEY_P8_BASE64" | base64 -D > "$notary_key"
           MANAGED_PUBLISH_MODE=host \
           PACKAGE_TOOL_MODE=host \
           PACKAGE_VERSION="$RELEASE_TAG" \
@@ -114,6 +124,10 @@ jobs:
             "artifacts/OpenUtau-DAW-$RELEASE_TAG-source.tar.gz.sha256"
           )
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            if [[ "$(gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft')" != true ]]; then
+              echo "Refusing to overwrite assets on non-draft release $RELEASE_TAG." >&2
+              exit 1
+            fi
             gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
           else
             gh release create "$RELEASE_TAG" "${assets[@]}" \
@@ -122,3 +136,10 @@ jobs:
               --notes-file "docs/releases/$RELEASE_TAG.md" \
               --draft --prerelease
           fi
+      - name: Remove signing material
+        if: always()
+        shell: bash
+        run: |
+          security delete-keychain "$RUNNER_TEMP/openutau-signing.keychain-db" \
+            >/dev/null 2>&1 || true
+          rm -f "$RUNNER_TEMP/openutau-release.p12" "$RUNNER_TEMP/AuthKey.p8"

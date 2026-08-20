@@ -16,10 +16,16 @@ Configure these repository Actions secrets before running it:
 - `NOTARY_API_KEY_ID` — API key identifier;
 - `NOTARY_API_ISSUER_ID` — App Store Connect issuer UUID.
 
-Run the workflow manually with `v0.1.0-alpha.1`. It creates or updates a
-**draft** release only. Review the attached binary, checksum, source archive,
-licences, known limitations, and retained workflow evidence before manually
-publishing the draft.
+Before running the workflow, create and push an **annotated signed**
+`v0.1.0-alpha.1` tag whose signature GitHub reports as verified. In the Actions
+UI, select that tag in **Use workflow from**, enter the same tag as the workflow
+input, and run it. The workflow rejects a branch run, a lightweight tag, a tag
+pointing at a different commit, or a signature GitHub cannot verify.
+
+The workflow creates or updates a **draft** release only and refuses to replace
+assets on a release that has already been published. Review the attached
+binary, checksums, source archive, licences, known limitations, and retained
+workflow evidence before manually publishing the draft.
 
 GitHub-hosted macOS runners are intentionally used in host mode because Docker
 is unavailable there. Normal development, managed publishing on the target

@@ -4,6 +4,7 @@ set -eu
 ./scripts/apply-upstream-patches.sh
 ./scripts/verify-upstream-patch.sh
 ./scripts/verify-editor-audio-isolation.sh
+./tests/release-tag-test.sh
 
 dotnet build bridge/OpenUtau.Vst.sln --configuration Release -p:WarningLevel=0
 ./tests/package-manifest-test.sh
