@@ -313,6 +313,10 @@ static async Task VerifySidecarSingerRenderAsync(
         Environment = {
             ["XDG_DATA_HOME"] = dataHome,
             ["XDG_CACHE_HOME"] = cacheHome,
+            // PathManager uses explicit VST paths on every platform. XDG is
+            // still supplied to cover the ordinary Linux path as well.
+            ["OPENUTAU_VST_DATA_HOME"] = Path.Combine(dataHome, "OpenUtau"),
+            ["OPENUTAU_VST_CACHE_HOME"] = Path.Combine(cacheHome, "OpenUtau"),
         },
     }) ?? throw new Exception("Failed to start singer-render engine host.");
     try {
