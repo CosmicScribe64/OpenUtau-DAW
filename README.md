@@ -76,6 +76,11 @@ private .NET runtime; users do not install .NET, OpenUtau, or development SDKs.
 Each archive is accompanied by a SHA-256 checksum and contains a verified
 file-level SHA-256 manifest for the package contents.
 
+The development image pins the multi-platform Microsoft .NET SDK 8.0.424 base
+by digest, and `global.json` disables SDK roll-forward. GitHub workflows
+likewise pin every third-party action to a full commit SHA instead of a movable
+major-version tag.
+
 ## Repository layout
 
 - `upstream/` — pinned OpenUtau source baseline (MIT)

@@ -6,6 +6,11 @@ runner, signs with hardened runtime, submits to Apple's notary service, staples
 and verifies the ticket, creates a complete corresponding-source archive that
 includes OpenUtau and JUCE source, and uploads checksummed assets.
 
+All third-party GitHub actions are pinned to immutable full commit SHAs. The
+macOS job installs .NET SDK 8.0.424, which is the SDK paired with the packaged
+.NET 8.0.30 runtime, and checkout does not persist the workflow token in Git
+configuration.
+
 Configure these repository Actions secrets before running it:
 
 - `MACOS_CERTIFICATE_P12_BASE64` — base64-encoded Developer ID Application

@@ -9,21 +9,24 @@ on:
         default: v0.1.0-alpha.1
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   container-verification:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
           submodules: recursive
+          persist-credentials: false
       - run: docker compose build dev
       - run: docker compose run --rm dev ./scripts/ci.sh
 
   signed-macos-arm64:
     needs: container-verification
     runs-on: macos-15
+    permissions:
+      contents: write
     env:
       MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
       MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
@@ -33,13 +36,14 @@ jobs:
       NOTARY_API_ISSUER_ID: ${{ secrets.NOTARY_API_ISSUER_ID }}
       RELEASE_TAG: ${{ inputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
           submodules: recursive
           fetch-depth: 0
-      - uses: actions/setup-dotnet@v4
+          persist-credentials: false
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
-          dotnet-version: 8.0.30
+          dotnet-version: 8.0.424
       - name: Validate release inputs
         shell: bash
         env:
@@ -102,7 +106,7 @@ jobs:
           JUCE_SOURCE_DIR="$GITHUB_WORKSPACE/.build/macos-arm64-release/_deps/juce-src" \
             ./scripts/package-source.sh "$RELEASE_TAG"
       - name: Upload retained build evidence
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: OpenUtau-DAW-${{ inputs.tag }}-release-candidate
           retention-days: 30

@@ -5,25 +5,30 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   container-tests:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
           submodules: recursive
+          persist-credentials: false
       - run: docker compose build dev
       - run: docker compose run --rm dev
 
   windows-vst3:
     runs-on: windows-2022
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
           submodules: recursive
-      - uses: actions/setup-dotnet@v4
+          persist-credentials: false
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
-          dotnet-version: 8.0.x
+          dotnet-version: 8.0.424
       - shell: pwsh
         run: ./scripts/ci-windows.ps1
       - shell: pwsh
@@ -48,7 +53,7 @@ jobs:
           if ($null -eq $validator) { throw "Steinberg validator executable was not built." }
           & $validator.FullName "artifacts/windows-x64/OpenUtau DAW.vst3"
           if ($LASTEXITCODE -ne 0) { throw "Steinberg VST3 validation failed." }
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: OpenUtau-DAW-windows-x64
           path: artifacts/OpenUtau-DAW-windows-x64.zip
@@ -57,9 +62,10 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     runs-on: [self-hosted, windows, x64, fl-studio]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
           submodules: recursive
+          persist-credentials: false
       - shell: pwsh
         run: ./scripts/package-windows.ps1
       - shell: pwsh
@@ -72,7 +78,7 @@ jobs:
             -ExpectedWav "tests/fl-studio/OpenUtauVst.expected.wav" `
             -OutputDirectory "artifacts/fl-studio-e2e" `
             -PluginBundle "artifacts/windows-x64/OpenUtau DAW.vst3"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: fl-studio-e2e-output
           path: artifacts/fl-studio-e2e
