@@ -105,9 +105,11 @@ bool verifyMissingHostRecovery(const juce::File& faultHost) {
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
   }
 
-  const auto staged = faultHost.copyFileTo(staging)
-      && staging.setExecutePermission(true)
-      && staging.moveFileTo(target);
+  auto staged = faultHost.copyFileTo(staging);
+#if !defined(_WIN32)
+  staged = staged && staging.setExecutePermission(true);
+#endif
+  staged = staged && staging.moveFileTo(target);
   const auto recovered = staged
       && waitForAudio(bridge, 1, std::chrono::seconds(15));
   const auto error = bridge.lastError();
