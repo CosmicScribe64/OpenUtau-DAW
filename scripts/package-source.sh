@@ -55,6 +55,8 @@ git -C "$juce_source" archive --format=tar --prefix="$prefix/third_party/JUCE/" 
 } > "$staging/$prefix/SOURCE-BUILD-INFO.txt"
 source_root="$staging/$prefix"
 git init -q "$source_root"
+printf '* -text\n' > "$source_root/.git/info/attributes"
+git -C "$source_root" config core.autocrlf false
 git -C "$source_root" add -f .
 GIT_AUTHOR_DATE="2000-01-01T00:00:00Z" \
 GIT_COMMITTER_DATE="2000-01-01T00:00:00Z" \
