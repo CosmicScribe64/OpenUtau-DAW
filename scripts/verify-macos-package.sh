@@ -33,7 +33,7 @@ do
   [[ -e "$required" ]] || { echo "Missing required package path: $required" >&2; exit 1; }
 done
 
-if ! find "$package/THIRD-PARTY-LICENSES" -type f -print -quit | rg -q .; then
+if ! find "$package/THIRD-PARTY-LICENSES" -type f -print -quit | grep -q .; then
   echo "Package has no collected third-party licence files." >&2
   exit 1
 fi
@@ -42,7 +42,8 @@ archive_directory="$(dirname "$archive")"
 (cd "$archive_directory" && shasum -a 256 -c "$(basename "$sidecar")")
 codesign --verify --deep --strict --verbose=2 "$bundle"
 if [[ "$require_notarized" == "1" ]]; then
-  codesign -d --verbose=4 "$bundle" 2>&1 | rg -q '^Authority=Developer ID Application:' || {
+  codesign -d --verbose=4 "$bundle" 2>&1 \
+    | grep -E '^Authority=Developer ID Application:' >/dev/null || {
     echo "Package is not signed with a Developer ID Application identity." >&2
     exit 1
   }
@@ -51,14 +52,14 @@ elif [[ "$require_notarized" != "0" ]]; then
   echo "REQUIRE_NOTARIZED must be 0 or 1." >&2
   exit 1
 fi
-file "$module" | rg -q "$machine_pattern" || {
+file "$module" | grep -Eq "$machine_pattern" || {
   echo "VST3 module is not $architecture." >&2; exit 1;
 }
-file "$worldline" | rg -q "$machine_pattern" || {
+file "$worldline" | grep -Eq "$machine_pattern" || {
   echo "Worldline renderer is not $architecture." >&2; exit 1;
 }
 
-if unzip -Z1 "$archive" | rg -q '(^|/)\._|(^|/)\.DS_Store$'; then
+if unzip -Z1 "$archive" | grep -E '(^|/)\._|(^|/)\.DS_Store$' >/dev/null; then
   echo "Archive contains Finder/resource-fork metadata." >&2
   exit 1
 fi
@@ -66,7 +67,8 @@ fi
 for binary in "$module" "$worldline"; do
   # otool headings name the inspected file (once per architecture); dependency
   # lines are indented. Check those lines only.
-  if otool -L "$binary" | rg '^[[:space:]]' | rg -q '(/Users/|/opt/homebrew/|/usr/local/)'; then
+  if otool -L "$binary" | grep -E '^[[:space:]]' \
+      | grep -E '(/Users/|/opt/homebrew/|/usr/local/)' >/dev/null; then
     echo "Package binary references a host-local dependency: $binary" >&2
     exit 1
   fi
