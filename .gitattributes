@@ -5,4 +5,5 @@
 *.csproj text eol=lf
 *.md text eol=lf
 *.png binary
+third_party/licenses/*.txt text eol=lf
 patches/*.patch text eol=lf whitespace=-blank-at-eol
