@@ -61,6 +61,11 @@ if ! grep -Fq "inputs.scope == 'windows-editor'" .github/workflows/build-and-val
   echo "Windows package smoke does not honor the focused workflow scope." >&2
   exit 1
 fi
+if [[ "$(grep -Fc "if: github.event_name != 'workflow_dispatch' || inputs.scope == 'all'" \
+    .github/workflows/build-and-validate.yml)" -lt 5 ]]; then
+  echo "Focused workflow scopes do not skip all full-matrix-only jobs and steps." >&2
+  exit 1
+fi
 if grep -Fq -- '- "**"' .github/workflows/build-and-validate.yml; then
   echo "Feature-branch pushes must not consume the full hosted validation matrix." >&2
   exit 1

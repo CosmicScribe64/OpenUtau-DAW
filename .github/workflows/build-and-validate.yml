@@ -88,7 +88,9 @@ jobs:
           name: windows-editor-smoke-diagnostics
           if-no-files-found: warn
           path: .build/windows-smoke-diagnostics
-      - shell: pwsh
+      - name: Run Steinberg VST3 validator
+        if: github.event_name != 'workflow_dispatch' || inputs.scope == 'all'
+        shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           git clone --no-checkout https://github.com/steinbergmedia/vst3sdk.git .build/vst3sdk
@@ -105,7 +107,9 @@ jobs:
           if ($null -eq $validator) { throw "Steinberg validator executable was not built." }
           & $validator.FullName "artifacts/windows-x64/OpenUtau DAW.vst3"
           if ($LASTEXITCODE -ne 0) { throw "Steinberg VST3 validation failed." }
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+      - name: Upload Windows package
+        if: github.event_name != 'workflow_dispatch' || inputs.scope == 'all'
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: OpenUtau-DAW-windows-x64
           path: |
