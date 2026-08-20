@@ -25,6 +25,22 @@ Git configuration, the Steinberg validator source is pinned to an exact Git
 commit, and only the final draft-release job receives `contents: write`
 permission.
 
+## Quota-conscious validation
+
+Ordinary feature-branch pushes do not start the hosted matrix. Run the Docker
+suite locally while iterating, then use **Build and validate → Run workflow**
+only when a platform runner is needed:
+
+- `container` runs only the portable Docker gate;
+- `windows-editor` builds the Windows package and exercises its embedded HWND;
+- `fl-studio-e2e` targets an explicitly configured licensed self-hosted runner;
+- `all` runs the complete cross-platform matrix.
+
+Pull requests and pushes to `main` always run the complete non-FL matrix. The
+release workflow remains tag-gated and always builds every distributable
+platform, so do not create the version tag until the focused platform checks
+and release notes are ready.
+
 ## Create a release candidate
 
 Create and push an annotated tag pointing at the reviewed clean commit:

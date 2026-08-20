@@ -1,10 +1,10 @@
 # Install on Windows x64
 
-> **Experimental alpha:** the Windows VST3 is built on Windows, opens its
-> embedded editor in the native smoke host, and passes Steinberg's VST3
-> validator. It has not yet completed an audible FL Studio-on-Windows
-> acceptance run. Please report Windows host results with the FL Studio version
-> and Windows version.
+> **Experimental alpha:** the Windows VST3 passes its native and audible
+> automation. A public ZIP is produced only after the packaged editor opens in
+> the native smoke host and Steinberg's VST3 validator passes. It has not yet
+> completed an audible FL Studio-on-Windows acceptance run. Please report
+> Windows host results with the FL Studio version and Windows version.
 
 1. Download the Windows x64 ZIP and its `.sha256` sidecar from the same GitHub
    release.

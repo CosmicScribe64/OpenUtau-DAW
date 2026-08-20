@@ -60,7 +60,7 @@ corresponding-source archive. Voicebanks are not bundled.
 | --- | --- |
 | macOS arm64 + FL Studio 2026 | Verified public alpha; ad-hoc signed and not Apple-notarized |
 | macOS Intel x64 | Automated native package; real Intel DAW acceptance pending |
-| Windows x64 + FL Studio | Experimental alpha; Windows build/editor smoke/Steinberg validation pass, licensed FL evidence pending |
+| Windows x64 + FL Studio | Experimental alpha; native/audio tests pass, current packaged-editor/Steinberg release gate and licensed FL evidence pending |
 | Linux x64 + native VST3 DAWs | Experimental package; companion editor window, native DAW acceptance pending |
 | Other VST3 DAWs | Expected to use the standard VST3 contract, but not yet acceptance-tested |
 
@@ -72,6 +72,17 @@ The supported development and regression entry point is Docker Compose:
 docker compose build dev
 docker compose run --rm dev ./scripts/ci.sh
 ```
+
+For a short editor-only iteration after the image is built:
+
+```sh
+docker compose run --rm dev dotnet run --project \
+  bridge/OpenUtau.Vst.EditorHost.Tests --configuration Release
+```
+
+The manual **Build and validate** workflow also has `container` and
+`windows-editor` scopes. Feature-branch pushes do not launch the hosted matrix;
+the full workflow still runs for pull requests and `main`.
 
 The container owns the .NET SDK, C/C++ toolchain, NuGet cache, CMake downloads,
 and portable test dependencies. Named Docker volumes retain caches, including
