@@ -29,10 +29,11 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
   echo "macOS packaging must run on macOS." >&2
   exit 1
 fi
-if [[ "$architecture" != "arm64" && "$architecture" != "x64" ]]; then
-  echo "ARCHITECTURE must be arm64 or x64." >&2
-  exit 1
-fi
+case "$architecture" in
+  arm64) cmake_architecture=arm64 ;;
+  x64) cmake_architecture=x86_64 ;;
+  *) echo "ARCHITECTURE must be arm64 or x64." >&2; exit 1 ;;
+esac
 if [[ "$managed_publish_mode" != "docker" && "$managed_publish_mode" != "host" ]]; then
   echo "MANAGED_PUBLISH_MODE must be docker or host." >&2
   exit 1
@@ -138,7 +139,7 @@ else
     -S "$root/plugin"
     -B "$build_directory"
     -DCMAKE_BUILD_TYPE="$configuration"
-    -DCMAKE_OSX_ARCHITECTURES="$architecture"
+    -DCMAKE_OSX_ARCHITECTURES="$cmake_architecture"
     -DCMAKE_OSX_DEPLOYMENT_TARGET="$macos_deployment_target"
   )
   if [[ -n "$juce_source_override" ]]; then
