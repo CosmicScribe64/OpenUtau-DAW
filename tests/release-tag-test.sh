@@ -68,4 +68,11 @@ expect_failure "unverified GitHub signature" env GH_STUB_VERIFIED=false \
   'cd "$1" && GH_BIN="$2" "$3" v1.0.0 "$4" refs/tags/v1.0.0 owner/repository' \
   release-tag-test "$repository" "$gh_stub" "$validator" "$first_commit"
 
+GH_STUB_VERIFIED=false GH_STUB_REASON=unsigned run_validator \
+  v1.0.0 "$first_commit" refs/tags/v1.0.0 owner/repository annotated \
+  > "$temporary/annotated-success-output"
+
+expect_failure "unknown verification policy" run_validator \
+  v1.0.0 "$first_commit" refs/tags/v1.0.0 owner/repository anything
+
 echo "GitHub release-tag validation tests passed."

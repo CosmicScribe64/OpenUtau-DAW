@@ -1,15 +1,25 @@
-name: Build signed release candidate
+name: Build community release candidate
 
 on:
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       tag:
-        description: Release tag and archive version
+        description: Existing annotated release tag and archive version
         required: true
         default: v0.1.0-alpha.1
 
 permissions:
   contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
 
 jobs:
   container-verification:
@@ -18,23 +28,23 @@ jobs:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
           submodules: recursive
+          fetch-depth: 0
           persist-credentials: false
+      - name: Validate release tag
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test -f "docs/releases/$RELEASE_TAG.md"
+          ./scripts/validate-github-release-tag.sh \
+            "$RELEASE_TAG" "$GITHUB_SHA" "$GITHUB_REF" "$GITHUB_REPOSITORY" annotated
       - run: docker compose build dev
       - run: docker compose run --rm dev ./scripts/ci.sh
 
-  signed-macos-arm64:
+  windows-x64:
     needs: container-verification
-    runs-on: macos-15
-    permissions:
-      contents: write
-    env:
-      MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
-      MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-      MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
-      NOTARY_API_KEY_P8_BASE64: ${{ secrets.NOTARY_API_KEY_P8_BASE64 }}
-      NOTARY_API_KEY_ID: ${{ secrets.NOTARY_API_KEY_ID }}
-      NOTARY_API_ISSUER_ID: ${{ secrets.NOTARY_API_ISSUER_ID }}
-      RELEASE_TAG: ${{ inputs.tag }}
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
@@ -44,60 +54,68 @@ jobs:
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
           dotnet-version: 8.0.424
-      - name: Validate release inputs
+      - name: Build and test Windows VST3
+        shell: pwsh
+        run: ./scripts/ci-windows.ps1
+      - name: Package Windows x64
+        shell: pwsh
+        run: ./scripts/package-windows.ps1 -PackageVersion $env:RELEASE_TAG
+      - name: Open embedded editor from packaged VST3
+        shell: pwsh
+        run: |
+          $smoke = Get-ChildItem .build/windows -Recurse `
+            -Filter "OpenUtau DAW smoke host.exe" | Select-Object -First 1
+          if ($null -eq $smoke) { throw "Packaged-editor smoke host was not built." }
+          $module = "artifacts/windows-x64/OpenUtau DAW.vst3/Contents/x86_64-win/OpenUtau DAW.vst3"
+          if (!(Test-Path $module)) { throw "Packaged VST3 module was not found." }
+          $env:OPENUTAU_VST_TEST_CREATE_EDITOR = "1"
+          & $smoke.FullName $module
+          if ($LASTEXITCODE -ne 0) { throw "Embedded Windows editor smoke test failed." }
+          Remove-Item Env:OPENUTAU_VST_TEST_CREATE_EDITOR
+      - name: Run Steinberg VST3 validator
+        shell: pwsh
+        run: |
+          git clone --no-checkout https://github.com/steinbergmedia/vst3sdk.git .build/vst3sdk
+          git -C .build/vst3sdk checkout 3cdf9ca5d1f5b1b21e0a86832aa4abe55607bd96
+          git -C .build/vst3sdk submodule update --init --recursive
+          cmake -S .build/vst3sdk -B .build/vst3sdk-build -A x64 -DSMTG_CREATE_PLUGIN_LINK=0
+          cmake --build .build/vst3sdk-build --config Release --target validator
+          $validator = Get-ChildItem .build/vst3sdk-build -Recurse -Filter validator.exe | Select-Object -First 1
+          if ($null -eq $validator) { throw "Steinberg validator executable was not built." }
+          & $validator.FullName "artifacts/windows-x64/OpenUtau DAW.vst3"
+          if ($LASTEXITCODE -ne 0) { throw "Steinberg VST3 validation failed." }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: OpenUtau-DAW-${{ env.RELEASE_TAG }}-windows-x64
+          retention-days: 30
+          path: |
+            artifacts/OpenUtau-DAW-${{ env.RELEASE_TAG }}-windows-x64.zip
+            artifacts/OpenUtau-DAW-${{ env.RELEASE_TAG }}-windows-x64.zip.sha256
+
+  macos-arm64:
+    needs: container-verification
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          submodules: recursive
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: 8.0.424
+      - name: Build ad-hoc-signed macOS arm64 package
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          case "$RELEASE_TAG" in
-            *[!A-Za-z0-9._-]*|'')
-              echo "Invalid release tag: $RELEASE_TAG" >&2
-              exit 1
-              ;;
-          esac
-          test -f "docs/releases/$RELEASE_TAG.md"
-          test -n "$MACOS_CERTIFICATE_P12_BASE64"
-          test -n "$MACOS_CERTIFICATE_PASSWORD"
-          test -n "$MACOS_SIGNING_IDENTITY"
-          test -n "$NOTARY_API_KEY_P8_BASE64"
-          test -n "$NOTARY_API_KEY_ID"
-          test -n "$NOTARY_API_ISSUER_ID"
           test "$(uname -m)" = arm64
-          cmake --version
-          ./scripts/validate-github-release-tag.sh \
-            "$RELEASE_TAG" "$GITHUB_SHA" "$GITHUB_REF" "$GITHUB_REPOSITORY"
-      - name: Import Developer ID certificate
-        shell: bash
-        run: |
-          set -euo pipefail
-          release_certificate="$RUNNER_TEMP/openutau-release.p12"
-          release_keychain="$RUNNER_TEMP/openutau-signing.keychain-db"
-          printf '%s' "$MACOS_CERTIFICATE_P12_BASE64" | base64 -D > "$release_certificate"
-          security create-keychain -p openutau-temporary-keychain "$release_keychain"
-          security set-keychain-settings -lut 21600 "$release_keychain"
-          security unlock-keychain -p openutau-temporary-keychain "$release_keychain"
-          security import "$release_certificate" -P "$MACOS_CERTIFICATE_PASSWORD" \
-            -A -t cert -f pkcs12 -k "$release_keychain"
-          security set-key-partition-list -S apple-tool:,apple:,codesign: \
-            -s -k openutau-temporary-keychain "$release_keychain"
-          security list-keychain -d user -s "$release_keychain"
-      - name: Build, sign, notarize, and verify macOS package
-        shell: bash
-        run: |
-          set -euo pipefail
-          notary_key="$RUNNER_TEMP/AuthKey.p8"
-          printf '%s' "$NOTARY_API_KEY_P8_BASE64" | base64 -D > "$notary_key"
           MANAGED_PUBLISH_MODE=host \
           PACKAGE_TOOL_MODE=host \
           PACKAGE_VERSION="$RELEASE_TAG" \
           BUILD_DIRECTORY="$GITHUB_WORKSPACE/.build/macos-arm64-release" \
           OUTPUT_DIRECTORY="$GITHUB_WORKSPACE/artifacts/macos-arm64-release" \
-          CODESIGN_IDENTITY="$MACOS_SIGNING_IDENTITY" \
-          NOTARIZE=1 \
-          NOTARY_KEY_PATH="$notary_key" \
-          NOTARY_KEY_ID="$NOTARY_API_KEY_ID" \
-          NOTARY_ISSUER_ID="$NOTARY_API_ISSUER_ID" \
+          CODESIGN_IDENTITY="-" \
+          NOTARIZE=0 \
           ./scripts/package-macos.sh
       - name: Create complete corresponding-source archive
         shell: bash
@@ -105,17 +123,40 @@ jobs:
           set -euo pipefail
           JUCE_SOURCE_DIR="$GITHUB_WORKSPACE/.build/macos-arm64-release/_deps/juce-src" \
             ./scripts/package-source.sh "$RELEASE_TAG"
-      - name: Upload retained build evidence
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: OpenUtau-DAW-${{ inputs.tag }}-release-candidate
+          name: OpenUtau-DAW-${{ env.RELEASE_TAG }}-macos-arm64-and-source
           retention-days: 30
           path: |
-            artifacts/OpenUtau-DAW-${{ inputs.tag }}-macos-arm64.zip
-            artifacts/OpenUtau-DAW-${{ inputs.tag }}-macos-arm64.zip.sha256
-            artifacts/OpenUtau-DAW-${{ inputs.tag }}-source.tar.gz
-            artifacts/OpenUtau-DAW-${{ inputs.tag }}-source.tar.gz.sha256
-      - name: Create or update draft GitHub release
+            artifacts/OpenUtau-DAW-${{ env.RELEASE_TAG }}-macos-arm64.zip
+            artifacts/OpenUtau-DAW-${{ env.RELEASE_TAG }}-macos-arm64.zip.sha256
+            artifacts/OpenUtau-DAW-${{ env.RELEASE_TAG }}-source.tar.gz
+            artifacts/OpenUtau-DAW-${{ env.RELEASE_TAG }}-source.tar.gz.sha256
+
+  draft-release:
+    needs: [windows-x64, macos-arm64]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: OpenUtau-DAW-${{ env.RELEASE_TAG }}-*
+          path: artifacts
+          merge-multiple: true
+      - name: Verify downloaded release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd artifacts
+          sha256sum -c "OpenUtau-DAW-$RELEASE_TAG-macos-arm64.zip.sha256"
+          sha256sum -c "OpenUtau-DAW-$RELEASE_TAG-windows-x64.zip.sha256"
+          sha256sum -c "OpenUtau-DAW-$RELEASE_TAG-source.tar.gz.sha256"
+      - name: Create or update draft GitHub prerelease
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -124,6 +165,8 @@ jobs:
           assets=(
             "artifacts/OpenUtau-DAW-$RELEASE_TAG-macos-arm64.zip"
             "artifacts/OpenUtau-DAW-$RELEASE_TAG-macos-arm64.zip.sha256"
+            "artifacts/OpenUtau-DAW-$RELEASE_TAG-windows-x64.zip"
+            "artifacts/OpenUtau-DAW-$RELEASE_TAG-windows-x64.zip.sha256"
             "artifacts/OpenUtau-DAW-$RELEASE_TAG-source.tar.gz"
             "artifacts/OpenUtau-DAW-$RELEASE_TAG-source.tar.gz.sha256"
           )
@@ -135,15 +178,8 @@ jobs:
             gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
           else
             gh release create "$RELEASE_TAG" "${assets[@]}" \
-              --target "$GITHUB_SHA" \
+              --verify-tag \
               --title "OpenUtau DAW $RELEASE_TAG" \
               --notes-file "docs/releases/$RELEASE_TAG.md" \
               --draft --prerelease
           fi
-      - name: Remove signing material
-        if: always()
-        shell: bash
-        run: |
-          security delete-keychain "$RUNNER_TEMP/openutau-signing.keychain-db" \
-            >/dev/null 2>&1 || true
-          rm -f "$RUNNER_TEMP/openutau-release.p12" "$RUNNER_TEMP/AuthKey.p8"

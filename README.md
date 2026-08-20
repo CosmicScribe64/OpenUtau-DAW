@@ -12,16 +12,17 @@ _The real FL Studio acceptance project on the target Mac: three singer tracks,
 Japanese and English phonemizers, rendered waveforms, and detailed pitch and
 phoneme editing in the embedded OpenUtau workspace._
 
-This repository is preparing an AGPLv3 open-source alpha, not yet a signed and
-notarized public binary release. The
-current implementation and its remaining release gates are recorded in
+This repository provides an AGPLv3 open-source alpha. The macOS community build
+is ad-hoc signed rather than Apple-notarized; Windows x64 is an experimental
+build until its licensed FL Studio host test is completed. The current
+implementation and verification evidence are recorded in
 [docs/architecture.md](docs/architecture.md) and
 [docs/verification.md](docs/verification.md). The concrete release handoff is
 tracked in [docs/release-checklist.md](docs/release-checklist.md).
-The signed/notarized draft-release workflow and required repository secrets are
-documented in [docs/github-release.md](docs/github-release.md).
-Installation instructions are in
-[docs/install-macos.md](docs/install-macos.md).
+The multi-platform community release workflow is documented in
+[docs/github-release.md](docs/github-release.md). Installation instructions are
+available for [macOS arm64](docs/install-macos.md) and
+[Windows x64](docs/install-windows.md).
 
 ## Current behavior
 
@@ -50,10 +51,15 @@ Installation instructions are in
 
 ## Support status
 
+Release downloads are published at
+[GitHub Releases](https://github.com/CosmicScribe64/OpenUtau-DAW/releases). Each
+binary has a SHA-256 sidecar, and every release includes its complete
+corresponding-source archive. Voicebanks are not bundled.
+
 | Platform / host | Status |
 | --- | --- |
-| macOS arm64 + FL Studio 2026 | Public-alpha candidate exercised on the target Mac; signing/notarization pending |
-| Windows x64 + FL Studio | Build/validator lane defined; licensed-host evidence still required |
+| macOS arm64 + FL Studio 2026 | Verified public alpha; ad-hoc signed and not Apple-notarized |
+| Windows x64 + FL Studio | Experimental alpha; Windows build/editor smoke/Steinberg validation pass, licensed FL evidence pending |
 | Other VST3 DAWs | Expected to use the standard VST3 contract, but not yet acceptance-tested |
 | Intel macOS | Not built or tested |
 
@@ -97,6 +103,7 @@ The OpenUtau baseline is pinned to
 the adapter can no longer be reproduced.
 
 The VST adapter and combined distribution use JUCE's AGPLv3 path; upstream
-OpenUtau remains MIT licensed. Public binaries must include the generated
-third-party notices and exact corresponding source, plus platform
-signing/notarization. See [docs/licensing.md](docs/licensing.md).
+OpenUtau remains MIT licensed. Public binaries include generated third-party
+notices and exact corresponding source. The macOS community artifact is
+explicitly disclosed as ad-hoc signed and non-notarized. See
+[docs/licensing.md](docs/licensing.md).

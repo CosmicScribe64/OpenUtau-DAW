@@ -25,4 +25,14 @@ if ! grep -Eq 'dotnet-version:[[:space:]]+8\.0\.424$' .github/workflows/*.yml; t
   exit 1
 fi
 
+if grep -REq 'git clone .*steinbergmedia/vst3sdk.*--depth|git clone --depth .*steinbergmedia/vst3sdk' \
+    .github/workflows; then
+  echo "Steinberg validator checkout uses a moving shallow branch." >&2
+  exit 1
+fi
+if ! grep -REq 'git -C .*vst3sdk checkout [0-9a-f]{40}$' .github/workflows; then
+  echo "Steinberg validator source is not pinned to a full commit SHA." >&2
+  exit 1
+fi
+
 echo "GitHub workflow pinning policy tests passed."

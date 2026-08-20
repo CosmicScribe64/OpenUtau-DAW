@@ -244,26 +244,31 @@ and frame count, correlation 0.9999901759, and a -64.40 dBFS null RMS with a
 time-based effects. The post-render log contained no sidecar, render,
 phonemizer, timeout, or audio-buffer failure.
 
-## Public-release blockers
+## Public-alpha release boundary
 
-The current result is a local public-alpha release candidate. Do not publish
-the binary until the remaining applicable items below are closed:
+The macOS arm64 result is suitable for a transparently labeled community alpha:
+the exact package has real FL Studio acceptance evidence, but its ad-hoc
+signature is not an Apple Developer identity and it is not notarized. Users are
+given a checksum-first, bundle-specific quarantine procedure; the project does
+not instruct anyone to disable Gatekeeper globally.
+
+Windows x64 may be attached only as **experimental** after its GitHub Windows
+job builds the self-contained archive, opens the packaged editor, verifies the
+package manifest, and passes Steinberg's validator. It must not be described as
+FL Studio-verified until the licensed Windows FLP/reference-WAV lane passes.
+
+The following remain post-alpha verification work rather than hidden claims:
+
+1. Complete the real FL host buffer/sample-rate matrix with the user's explicit
+   permission before changing their working audio configuration.
+2. Add Developer ID signing and notarization if a future maintainer or sponsor
+   provides the Apple service.
+3. Complete the licensed Windows FL Studio render fixture and promote Windows
+   from experimental only after it passes.
+4. Acceptance-test every additional DAW/platform before listing it as
+   supported.
 
 The executable handoff checklist is [release-checklist.md](release-checklist.md).
-
-1. Complete the remaining real-host buffer matrix without unexpectedly
-   changing a user's working audio configuration.
-2. Sign with an appropriate Apple Developer ID, notarize, staple, and test on a
-   clean Mac. The current local package is ad-hoc signed only.
-3. Configure a GitHub remote and repository signing/notarization secrets, make
-   a signed version tag, and run the draft-release workflow. The source is
-   committed locally, but this checkout has no remote and this Mac has no
-   Developer ID signing identity.
-4. For Windows support, produce and sign the x64 package, run Steinberg's
-   validator, and complete the licensed FL Studio runner with checked-in
-   FLP/reference-WAV fixtures. Until then, Windows is not a verified target.
-5. Acceptance-test every additional DAW/platform before listing it as
-   supported.
 
 The one-visible-editor constraint is accepted as a clearly documented
 limitation for the first public alpha; processors remain independent. The
@@ -276,5 +281,6 @@ implemented. A later release may refactor upstream singleton editor services.
 self-contained package and validator work. `tests/fl-studio` defines a bounded,
 stale-output-safe FL command-line render with hashed evidence. The binary FLP
 and reference WAV cannot be produced faithfully in Linux and are still absent.
-No Windows compatibility claim should be made until that lane produces its
-artifacts on a licensed runner.
+Until that lane produces its artifacts on a licensed runner, the generated
+Windows package is an experimental VST3 build rather than a verified FL Studio
+target.

@@ -1,7 +1,8 @@
 param(
     [string]$Configuration = "Release",
     [string]$BuildDirectory = ".build/windows",
-    [string]$OutputDirectory = "artifacts/windows-x64"
+    [string]$OutputDirectory = "artifacts/windows-x64",
+    [string]$PackageVersion = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -9,6 +10,10 @@ $root = Split-Path -Parent $PSScriptRoot
 $build = Join-Path $root $BuildDirectory
 $output = Join-Path $root $OutputDirectory
 $publish = Join-Path $build "publish"
+
+if ($PackageVersion -and $PackageVersion -notmatch '^[A-Za-z0-9._-]+$') {
+    throw "PackageVersion contains unsupported characters: $PackageVersion"
+}
 
 & (Join-Path $root "scripts/apply-upstream-patches.ps1")
 
@@ -114,7 +119,12 @@ if ($LASTEXITCODE -ne 0) { throw "Could not generate third-party runtime notices
     --configuration $Configuration --no-restore -- create $output
 if ($LASTEXITCODE -ne 0) { throw "Could not create package manifest." }
 
-$archive = Join-Path (Split-Path $output -Parent) "OpenUtau-DAW-windows-x64.zip"
+$archiveName = if ($PackageVersion) {
+    "OpenUtau-DAW-$PackageVersion-windows-x64.zip"
+} else {
+    "OpenUtau-DAW-windows-x64.zip"
+}
+$archive = Join-Path (Split-Path $output -Parent) $archiveName
 if (Test-Path $archive) { Remove-Item $archive -Force }
 Compress-Archive -Path (Join-Path $output "*") -DestinationPath $archive
 & dotnet run --project $noticeTool `

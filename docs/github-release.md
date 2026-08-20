@@ -1,37 +1,68 @@
-# GitHub release setup
+# GitHub community release
 
-The `Build signed release candidate` workflow creates a draft prerelease. It
-runs the Docker regression suite, builds macOS arm64 on GitHub's arm64 macOS 15
-runner, signs with hardened runtime, submits to Apple's notary service, staples
-and verifies the ticket, creates a complete corresponding-source archive that
-includes OpenUtau and JUCE source, and uploads checksummed assets.
+The `Build community release candidate` workflow creates or updates a **draft
+prerelease** from an existing annotated version tag. It does not require an
+Apple Developer account or repository secrets.
+
+The workflow:
+
+1. runs the canonical Docker regression suite;
+2. builds the native Windows x64 VST3 on Windows, opens its embedded editor in
+   the smoke host, and runs Steinberg's validator;
+3. builds the native Apple-silicon VST3 on an arm64 macOS runner and applies an
+   ad-hoc code signature;
+4. creates the complete corresponding-source archive containing the pinned
+   OpenUtau and JUCE source trees;
+5. verifies all three SHA-256 sidecars after transferring the assets between
+   isolated jobs; and
+6. attaches both platform ZIPs, the source archive, and all checksum sidecars
+   to a draft GitHub prerelease.
 
 All third-party GitHub actions are pinned to immutable full commit SHAs. The
-macOS job installs .NET SDK 8.0.424, which is the SDK paired with the packaged
-.NET 8.0.30 runtime, and checkout does not persist the workflow token in Git
-configuration.
+jobs install .NET SDK 8.0.424, checkout does not persist the workflow token in
+Git configuration, the Steinberg validator source is pinned to an exact Git
+commit, and only the final draft-release job receives `contents: write`
+permission.
 
-Configure these repository Actions secrets before running it:
+## Create a release candidate
 
-- `MACOS_CERTIFICATE_P12_BASE64` — base64-encoded Developer ID Application
-  certificate and private key exported as PKCS#12;
-- `MACOS_CERTIFICATE_PASSWORD` — password for that PKCS#12 file;
-- `MACOS_SIGNING_IDENTITY` — the complete `Developer ID Application: …` name;
-- `NOTARY_API_KEY_P8_BASE64` — base64-encoded App Store Connect API private key;
-- `NOTARY_API_KEY_ID` — API key identifier;
-- `NOTARY_API_ISSUER_ID` — App Store Connect issuer UUID.
+Create and push an annotated tag pointing at the reviewed clean commit:
 
-Before running the workflow, create and push an **annotated signed**
-`v0.1.0-alpha.1` tag whose signature GitHub reports as verified. In the Actions
-UI, select that tag in **Use workflow from**, enter the same tag as the workflow
-input, and run it. The workflow rejects a branch run, a lightweight tag, a tag
-pointing at a different commit, or a signature GitHub cannot verify.
+```sh
+git tag -a v0.1.0-alpha.1 -m "OpenUtau DAW v0.1.0-alpha.1"
+git push origin main
+git push origin v0.1.0-alpha.1
+```
 
-The workflow creates or updates a **draft** release only and refuses to replace
-assets on a release that has already been published. Review the attached
-binary, checksums, source archive, licences, known limitations, and retained
-workflow evidence before manually publishing the draft.
+The tag push starts the workflow automatically. A manual rerun is also
+available in Actions, but **Use workflow from** must select that exact tag and
+the input must contain the same tag. The workflow rejects branch refs,
+lightweight tags, and tags resolving to a different workflow commit.
 
-GitHub-hosted macOS runners are intentionally used in host mode because Docker
-is unavailable there. Normal development, managed publishing on the target
-Mac, and the canonical regression suite remain Docker-first.
+Signing the Git tag remains encouraged when a GitHub-recognized signing key is
+available, but is not required for this community alpha. SSH authentication,
+the exact tag/commit gate, immutable action pins, package manifests,
+corresponding source, and retained Actions logs provide the available
+provenance.
+
+## Review and publish
+
+The workflow deliberately stops at a draft. Before selecting **Publish
+release** in GitHub, confirm:
+
+- all four workflow jobs passed;
+- the draft contains macOS arm64, Windows x64, source, and three checksum
+  sidecars;
+- Windows is labeled experimental in the notes;
+- macOS is labeled ad-hoc signed and not Apple-notarized;
+- the checksum sidecars match their downloads; and
+- the known one-visible-editor limitation remains disclosed.
+
+GitHub-hosted macOS runners are used in host mode because Docker is unavailable
+there. Normal development, managed publishing on the target Mac, and the
+canonical portable regression suite remain Docker-first.
+
+If the project later obtains Apple Developer credentials, the same macOS
+package script supports Developer ID signing, notarization, and stapling with
+`CODESIGN_IDENTITY`, `NOTARIZE=1`, and the `NOTARY_*` inputs. Those credentials
+must be kept in encrypted Actions secrets and never committed.

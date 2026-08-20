@@ -4,7 +4,9 @@ OpenUtau's upstream source is MIT licensed. The native plugin shell pins JUCE
 8.0.15, whose modules are dual-licensed under AGPLv3 or a commercial JUCE
 licence. This repository selects the open-source **AGPLv3** path for the VST
 adapter and combined binary; its root `LICENSE` contains the complete terms.
-The current ad-hoc-signed development package is still not a public release.
+The macOS community release is ad-hoc signed and explicitly disclosed as not
+Apple-notarized. Code signing and notarization affect platform trust and user
+experience, not the availability of the source under the licences above.
 
 Every binary release must include or accompany the exact corresponding source,
 including the pinned OpenUtau baseline, adapter patch, native and managed

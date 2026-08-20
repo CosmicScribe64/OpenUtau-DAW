@@ -2,6 +2,8 @@ name: Build and validate
 
 on:
   push:
+    branches:
+      - "**"
   pull_request:
   workflow_dispatch:
 
@@ -46,7 +48,9 @@ jobs:
           Remove-Item Env:OPENUTAU_VST_TEST_CREATE_EDITOR
       - shell: pwsh
         run: |
-          git clone --depth 1 --recursive https://github.com/steinbergmedia/vst3sdk.git .build/vst3sdk
+          git clone --no-checkout https://github.com/steinbergmedia/vst3sdk.git .build/vst3sdk
+          git -C .build/vst3sdk checkout 3cdf9ca5d1f5b1b21e0a86832aa4abe55607bd96
+          git -C .build/vst3sdk submodule update --init --recursive
           cmake -S .build/vst3sdk -B .build/vst3sdk-build -A x64 -DSMTG_CREATE_PLUGIN_LINK=0
           cmake --build .build/vst3sdk-build --config Release --target validator
           $validator = Get-ChildItem .build/vst3sdk-build -Recurse -Filter validator.exe | Select-Object -First 1
