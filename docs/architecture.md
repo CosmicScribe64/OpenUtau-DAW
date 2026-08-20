@@ -105,4 +105,5 @@ bounded deadline. Manual restart exercises the same recovery path. Automated
 tests force a process exit, a render hang, and a temporarily missing engine
 binary, and prove automatic relaunch without blocking the audio callback.
 Managed tests also cover missing-singer persistence and bundled resampler and
-wavtool fallbacks. Real FL process injection remains a separate release gate.
+wavtool fallbacks. Real FL process injection additionally covers sidecar exit,
+bounded timeout, and temporary engine-host removal and restoration.

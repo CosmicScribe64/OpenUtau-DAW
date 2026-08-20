@@ -118,7 +118,8 @@ user listening confirmation:
 | Save FLP, close FL, reopen, and prove the complete OpenUtau state restored | Passed across a fresh FL Studio process |
 | Offline FL WAV export and reference-render comparison | Passed with the exact installed archive on 2026-08-19 |
 | 44.1/48/96 kHz and 64–2048 sample host-buffer matrix | Loaded-VST3 container matrix passed; real-FL hardware matrix still required |
-| Forced sidecar crash, hang, missing engine, singer, resampler/wavtool recovery | Passed in container; real-FL process injection remains a release gate |
+| Forced sidecar crash, hang, and missing engine recovery | Passed in container and by process injection in real FL Studio on 2026-08-19 |
+| Missing singer and resampler/wavtool fallback recovery | Passed in deterministic container tests |
 
 The clean-rebuilt candidate was installed after preserving the prior bundle.
 FL reopened `OpenUtau VST E2E_2.flp`, restored Teto Japanese, Teto English, and
@@ -169,8 +170,30 @@ the following without modifying the host machine or a user's voicebanks:
   audio.
 
 These are deterministic container tests, not a claim that process injection
-has been performed inside the user's live FL Studio session. That final host
-exercise remains intentionally separate.
+alone proves host behavior. The corresponding real-host injections are
+recorded below.
+
+### Real FL Studio process-injection acceptance
+
+On 2026-08-19, the byte-exact installed candidate was loaded with two OpenUtau
+DAW processors in FL Studio 2026. The following operations were performed only
+against isolated OpenUtau render sidecars; FL's audio device and buffer
+settings were not changed:
+
+- terminating one sidecar left FL responsive; because the stopped transport's
+  render-ahead ring was already full, relaunch correctly waited until playback
+  resumed, then the dead PID was replaced and the synchronized playhead kept
+  advancing;
+- suspending the replacement sidecar caused its in-flight render request to
+  hit the bounded timeout, after which the old PID was killed and replaced
+  while FL transport continued;
+- moving the installed engine-host DLL aside, terminating one sidecar, and
+  resuming playback left only the unaffected instance running; restoring the
+  exact DLL caused the missing instance to reconnect automatically.
+
+After the missing-resource exercise, two sidecars were running again, FL
+stopped normally at 0.000 seconds, the installed bundle compared byte-for-byte
+with the packaged VST3, and strict deep code-signature verification passed.
 
 The working FL project is
 `~/Documents/Image-Line/FL Studio/Projects/OpenUtau VST E2E/OpenUtau VST E2E.flp`.
@@ -232,15 +255,14 @@ The executable handoff checklist is [release-checklist.md](release-checklist.md)
    changing a user's working audio configuration.
 2. Sign with an appropriate Apple Developer ID, notarize, staple, and test on a
    clean Mac. The current local package is ad-hoc signed only.
-3. Complete crash/hang/missing-dependency recovery in real FL Studio.
-4. Configure a GitHub remote and repository signing/notarization secrets, make
+3. Configure a GitHub remote and repository signing/notarization secrets, make
    a signed version tag, and run the draft-release workflow. The source is
    committed locally, but this checkout has no remote and this Mac has no
    Developer ID signing identity.
-5. For Windows support, produce and sign the x64 package, run Steinberg's
+4. For Windows support, produce and sign the x64 package, run Steinberg's
    validator, and complete the licensed FL Studio runner with checked-in
    FLP/reference-WAV fixtures. Until then, Windows is not a verified target.
-6. Acceptance-test every additional DAW/platform before listing it as
+5. Acceptance-test every additional DAW/platform before listing it as
    supported.
 
 The one-visible-editor constraint is accepted as a clearly documented

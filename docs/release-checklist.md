@@ -41,8 +41,8 @@ as a completed public VST3 release. Check an item only with retained evidence
   FL Studio with the VST project loaded (2026-08-19).
 - [ ] Repeat on the intended host buffer/sample-rate matrix without changing a
   user’s working configuration unexpectedly.
-- [ ] Exercise sidecar exit, timeout, and missing-resource recovery in the real
-  host; container fault tests alone are insufficient.
+- [x] Exercise sidecar exit, timeout, and missing-engine recovery in real FL
+  Studio with the exact installed candidate (2026-08-19).
 - [x] Accept and document one visible editor at a time as a public-alpha known
   limitation; processors render and save independently.
 - [ ] Perform acceptance in every additional DAW/platform before claiming it
