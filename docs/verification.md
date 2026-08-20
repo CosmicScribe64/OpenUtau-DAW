@@ -45,8 +45,9 @@ source in a new CMake build directory using AppleClang and pinned JUCE 8.0.15;
 managed components and the private runtime were republished through Docker.
 The exact archive SHA-256 is recorded in its sibling `.zip.sha256` file rather
 than embedded here, which avoids a self-referential package checksum. The
-native module SHA-256 is
-`56404c9f0afb02948a584ce1c36b4b1bc08b2d957fbd0542aa6d8a44a736145b`.
+exact signed native-module hash is recorded in the archive's
+`PACKAGE-MANIFEST.sha256`; ad-hoc and Developer ID signing legitimately change
+the executable's signature bytes, so a source-document hash would become stale.
 
 The complete corresponding-source archive contains this repository, the
 pinned OpenUtau tree, and the pinned JUCE 8.0.15 tree. Two independent archive
@@ -101,7 +102,7 @@ user listening confirmation:
 | Behavior | Evidence status |
 | --- | --- |
 | Exact verified archive installed byte-for-byte and reopened in FL | Passed on 2026-08-19 |
-| Clean-rebuilt native module installed byte-for-byte and loaded in FL | Passed on 2026-08-19; module SHA-256 `56404c9f…6145b` |
+| Clean-rebuilt native module installed byte-for-byte and loaded in FL | Passed on 2026-08-19; exact hash retained in `PACKAGE-MANIFEST.sha256` |
 | Clean discovery as `OpenUtau DAW` VST3 generator | Passed |
 | Full OpenUtau workspace embedded in one FL plug-in window | Passed |
 | Audible Teto phrase synchronized to FL transport | Passed |
