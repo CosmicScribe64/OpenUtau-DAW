@@ -12,7 +12,7 @@ public:
   ManagedEditorHost() = default;
   ~ManagedEditorHost();
 
-  void* create(int width, int height);
+  void* create(int width, int height, std::uint64_t instanceId);
   void destroy();
   bool setProjectState(const void* data, std::size_t size);
   bool pullProjectState(juce::MemoryBlock& destination);
@@ -21,7 +21,10 @@ public:
                         int timeSignatureNumerator,
                         int timeSignatureDenominator, bool playing);
   bool pullPreview(float* interleaved, std::size_t capacityFrames,
-                   std::size_t& copiedFrames, bool& active);
+                   std::size_t& copiedFrames, bool& active,
+                   std::uint64_t& revision);
+  int previewToneState(double& frequency, std::uint64_t& revision);
+  bool focus();
   [[nodiscard]] juce::String lastError() const { return lastError_; }
 
 private:

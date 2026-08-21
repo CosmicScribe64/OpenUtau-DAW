@@ -19,7 +19,7 @@ using close_runtime_fn = int32_t(__cdecl *)(hostfxr_handle);
 using load_assembly_fn = int32_t(__cdecl *)(const wchar_t*, const wchar_t*,
                                             const wchar_t*, const wchar_t*,
                                             void*, void**);
-using create_editor_fn = void* (__cdecl *)(int32_t, int32_t);
+using create_editor_fn = void* (__cdecl *)(int32_t, int32_t, int64_t);
 using destroy_editor_fn = void(__cdecl *)(void*);
 using get_error_fn = const char* (__cdecl *)();
 using get_revision_fn = int64_t(__cdecl *)();
@@ -28,6 +28,8 @@ using set_state_fn = int32_t(__cdecl *)(const std::uint8_t*, int32_t);
 using set_host_transport_fn = int32_t(__cdecl *)(
     int64_t, double, double, double, int32_t, int32_t, int32_t);
 using get_preview_state_fn = int32_t(__cdecl *)();
+using get_preview_revision_fn = int64_t(__cdecl *)();
+using get_preview_tone_fn = int32_t(__cdecl *)(double*, int64_t*);
 using copy_preview_fn = int32_t(__cdecl *)(float*, int32_t);
 
 struct hostfxr_initialize_parameters {
@@ -77,6 +79,8 @@ struct Runtime final {
   set_state_fn setState{};
   set_host_transport_fn setHostTransport{};
   get_preview_state_fn getPreviewState{};
+  get_preview_revision_fn getPreviewRevision{};
+  get_preview_tone_fn getPreviewTone{};
   copy_preview_fn copyPreview{};
   juce::String error;
 
@@ -173,6 +177,8 @@ struct Runtime final {
     void* rawSetState{};
     void* rawSetHostTransport{};
     void* rawGetPreviewState{};
+    void* rawGetPreviewRevision{};
+    void* rawGetPreviewTone{};
     void* rawCopyPreview{};
     const auto createResult = loadAssembly(
         assemblyPath.toWideCharPointer(), typeName, L"Create",
@@ -198,17 +204,27 @@ struct Runtime final {
     const auto previewStateResult = loadAssembly(
         assemblyPath.toWideCharPointer(), typeName, L"GetPreviewState",
         unmanagedCallersOnly, nullptr, &rawGetPreviewState);
+    const auto previewRevisionResult = loadAssembly(
+        assemblyPath.toWideCharPointer(), typeName, L"GetPreviewRevision",
+        unmanagedCallersOnly, nullptr, &rawGetPreviewRevision);
+    const auto previewToneResult = loadAssembly(
+        assemblyPath.toWideCharPointer(), typeName, L"GetPreviewTone",
+        unmanagedCallersOnly, nullptr, &rawGetPreviewTone);
     const auto previewCopyResult = loadAssembly(
         assemblyPath.toWideCharPointer(), typeName, L"CopyPreview",
         unmanagedCallersOnly, nullptr, &rawCopyPreview);
     if (createResult != 0 || destroyResult != 0 || errorResult != 0
         || revisionResult != 0 || copyResult != 0 || setResult != 0
         || transportResult != 0 || previewStateResult != 0
+        || previewRevisionResult != 0
+        || previewToneResult != 0
         || previewCopyResult != 0 || rawCreate == nullptr
         || rawDestroy == nullptr || rawGetError == nullptr
         || rawGetRevision == nullptr || rawCopyState == nullptr
         || rawSetState == nullptr || rawSetHostTransport == nullptr
-        || rawGetPreviewState == nullptr || rawCopyPreview == nullptr) {
+        || rawGetPreviewState == nullptr || rawGetPreviewRevision == nullptr
+        || rawGetPreviewTone == nullptr
+        || rawCopyPreview == nullptr) {
       error = "Unable to bind the managed editor entry points.";
       return false;
     }
@@ -220,6 +236,9 @@ struct Runtime final {
     setState = reinterpret_cast<set_state_fn>(rawSetState);
     setHostTransport = reinterpret_cast<set_host_transport_fn>(rawSetHostTransport);
     getPreviewState = reinterpret_cast<get_preview_state_fn>(rawGetPreviewState);
+    getPreviewRevision = reinterpret_cast<get_preview_revision_fn>(
+        rawGetPreviewRevision);
+    getPreviewTone = reinterpret_cast<get_preview_tone_fn>(rawGetPreviewTone);
     copyPreview = reinterpret_cast<copy_preview_fn>(rawCopyPreview);
     return true;
   }
@@ -236,7 +255,8 @@ namespace openutau::vst {
 
 ManagedEditorHost::~ManagedEditorHost() { destroy(); }
 
-void* ManagedEditorHost::create(const int width, const int height) {
+void* ManagedEditorHost::create(
+    const int width, const int height, const std::uint64_t instanceId) {
   destroy();
   auto& shared = runtime();
   if (!shared.initialize()) {
@@ -248,7 +268,8 @@ void* ManagedEditorHost::create(const int width, const int height) {
                  "opening this instance; both instances continue rendering independently.";
     return nullptr;
   }
-  nativeView_ = shared.create(width, height);
+  nativeView_ = shared.create(
+      width, height, static_cast<std::int64_t>(instanceId));
   if (nativeView_ == nullptr) {
     const auto* managedError = shared.getError != nullptr ? shared.getError() : nullptr;
     lastError_ = managedError != nullptr
@@ -312,13 +333,16 @@ bool ManagedEditorHost::setHostTransport(
 
 bool ManagedEditorHost::pullPreview(
     float* const interleaved, const std::size_t capacityFrames,
-    std::size_t& copiedFrames, bool& active) {
+    std::size_t& copiedFrames, bool& active, std::uint64_t& revision) {
   copiedFrames = 0;
   active = false;
+  revision = 0;
   if (nativeView_ == nullptr || runtime().getPreviewState == nullptr
+      || runtime().getPreviewRevision == nullptr
       || runtime().copyPreview == nullptr) return false;
   auto& shared = runtime();
   active = shared.getPreviewState() != 0;
+  revision = static_cast<std::uint64_t>(shared.getPreviewRevision());
   if (!active || interleaved == nullptr || capacityFrames == 0) return true;
   const auto bounded = std::min<std::size_t>(
       capacityFrames, static_cast<std::size_t>(std::numeric_limits<int32_t>::max()));
@@ -327,6 +351,24 @@ bool ManagedEditorHost::pullPreview(
   if (copied >= 0) copiedFrames = static_cast<std::size_t>(copied);
   active = shared.getPreviewState() != 0 || copiedFrames > 0;
   return true;
+}
+
+int ManagedEditorHost::previewToneState(
+    double& frequency, std::uint64_t& revision) {
+  frequency = 0.0;
+  revision = 0;
+  if (nativeView_ == nullptr || runtime().getPreviewTone == nullptr) return -1;
+  int64_t managedRevision = 0;
+  const auto state = runtime().getPreviewTone(&frequency, &managedRevision);
+  revision = static_cast<std::uint64_t>(managedRevision);
+  return state >= -1 && state <= 1 ? state : -1;
+}
+
+bool ManagedEditorHost::focus() {
+  if (nativeView_ == nullptr) return false;
+  const auto window = static_cast<HWND>(nativeView_);
+  SetFocus(window);
+  return GetFocus() == window;
 }
 
 } // namespace openutau::vst

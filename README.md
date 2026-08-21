@@ -36,8 +36,10 @@ Installation notes:
 - OpenUtau project data is saved in the VST state, so it travels with the DAW
   project.
 - Multiple instances keep separate audio and project state.
+- Closing an editor, or moving between instances, returns to that instance's
+  previous piano-roll view.
 - Common transport shortcuts are passed back to FL Studio. Editor shortcuts
-  such as undo, redo, and open stay in OpenUtau.
+  such as undo, redo, delete, and open stay in OpenUtau.
 
 ## Limitations
 
@@ -76,7 +78,9 @@ process.
 OpenUtau is pinned as a submodule at
 `29e0e16d1623cda79ba7c3724614d6129ba3b9d5`. The VST-specific changes live in
 `patches/openutau-vst.patch`; the build scripts apply that patch before
-compiling.
+compiling. After editing files under `upstream/`, run
+`./scripts/refresh-upstream-patch.sh` to rebuild the patch and check it against
+a clean copy of the pinned OpenUtau source.
 
 More detail is available in the [architecture notes](docs/architecture.md) and
 [test record](docs/verification.md).

@@ -15,8 +15,10 @@ public sealed class VstPreviewAudioOutput : IAudioOutput, IDisposable {
     private const int DefaultSampleRate = 44100;
     private const int CapacityFrames = 1 << 18;
     private const int ProducerFrames = 2048;
+    private const int MaxBufferedMilliseconds = 250;
 
     private readonly object gate = new();
+    private readonly HashSet<double> activeTones = [];
     private readonly float[] ring = new float[CapacityFrames * Channels];
     private readonly int frameMask = CapacityFrames - 1;
     private ISampleProvider? source;
@@ -27,12 +29,18 @@ public sealed class VstPreviewAudioOutput : IAudioOutput, IDisposable {
     private long writeFrame;
     private long readFrame;
     private long positionFrames;
+    private long bufferRevision;
+    private long toneRevision;
+    private double auditionFrequency;
+    private int toneAuditionMode;
     private int endOfStream;
     private bool disposed;
 
     public PlaybackState PlaybackState =>
         (PlaybackState)Volatile.Read(ref playbackState);
     public int DeviceNumber => 0;
+    public long BufferRevision => Volatile.Read(ref bufferRevision);
+    public long ToneRevision => Volatile.Read(ref toneRevision);
 
     public void SetSampleRate(double sampleRate) {
         if (!double.IsFinite(sampleRate) || sampleRate < 8000 || sampleRate > 384000) {
@@ -56,6 +64,11 @@ public sealed class VstPreviewAudioOutput : IAudioOutput, IDisposable {
                 prepared = new WdlResamplingSampleProvider(prepared, outputSampleRate);
             }
             source = prepared;
+            if (activeTones.Count == 0
+                    && Volatile.Read(ref toneAuditionMode) != 0) {
+                Volatile.Write(ref toneAuditionMode, 0);
+                Interlocked.Increment(ref toneRevision);
+            }
             Volatile.Write(ref writeFrame, 0);
             Volatile.Write(ref readFrame, 0);
             Volatile.Write(ref positionFrames, 0);
@@ -92,6 +105,56 @@ public sealed class VstPreviewAudioOutput : IAudioOutput, IDisposable {
     public void Stop() {
         lock (gate) {
             StopLocked(clearSource: true);
+        }
+    }
+
+    public void DiscardBufferedAudio() {
+        bool resume;
+        lock (gate) {
+            if (disposed) return;
+            resume = source is not null && PlaybackState == PlaybackState.Playing;
+            StopLocked(clearSource: false);
+            Interlocked.Increment(ref bufferRevision);
+        }
+        if (resume) Play();
+    }
+
+    public void NotifyToneStarted(double frequency) {
+        if (!double.IsFinite(frequency) || frequency <= 0) return;
+        lock (gate) {
+            if (disposed) return;
+            activeTones.Add(frequency);
+            Volatile.Write(ref auditionFrequency, frequency);
+            Volatile.Write(ref toneAuditionMode, 1);
+            Interlocked.Increment(ref toneRevision);
+        }
+    }
+
+    public void NotifyToneEnded(double frequency) {
+        lock (gate) {
+            if (disposed) return;
+            activeTones.Remove(frequency);
+            if (activeTones.Count > 0) {
+                Volatile.Write(ref auditionFrequency, activeTones.Last());
+            }
+            Interlocked.Increment(ref toneRevision);
+        }
+    }
+
+    public void NotifyAllTonesEnded() {
+        lock (gate) {
+            if (disposed) return;
+            activeTones.Clear();
+            Interlocked.Increment(ref toneRevision);
+        }
+    }
+
+    public int CopyToneState(out double frequency, out long revision) {
+        lock (gate) {
+            frequency = Volatile.Read(ref auditionFrequency);
+            revision = Volatile.Read(ref toneRevision);
+            if (Volatile.Read(ref toneAuditionMode) == 0) return -1;
+            return activeTones.Count > 0 ? 1 : 0;
         }
     }
 
@@ -146,8 +209,15 @@ public sealed class VstPreviewAudioOutput : IAudioOutput, IDisposable {
                     && PlaybackState == PlaybackState.Playing) {
                 var write = Volatile.Read(ref writeFrame);
                 var read = Volatile.Read(ref readFrame);
-                var writable = CapacityFrames - (int)Math.Min(
+                var queued = (int)Math.Min(
                     CapacityFrames, Math.Max(0, write - read));
+                // Keep preview playback bounded so transport and edit changes
+                // do not leave stale audio queued far ahead of the DAW.
+                var latencyLimit = Math.Max(1,
+                    outputSampleRate * MaxBufferedMilliseconds / 1000);
+                var writable = Math.Min(
+                    CapacityFrames - queued,
+                    Math.Max(0, latencyLimit - queued));
                 if (writable == 0) {
                     cancellationToken.WaitHandle.WaitOne(2);
                     continue;

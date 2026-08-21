@@ -41,6 +41,21 @@ index 34c3666..5adeb9d 100644
                      } catch (Exception e) {
                          Log.Error(e, $"phonemizer failed to setup.");
                          p.SetUpException = e;
+diff --git a/OpenUtau.Core/Audio/IAudioOutput.cs b/OpenUtau.Core/Audio/IAudioOutput.cs
+index 1b46aa2..5f9fab3 100644
+--- a/OpenUtau.Core/Audio/IAudioOutput.cs
++++ b/OpenUtau.Core/Audio/IAudioOutput.cs
+@@ -21,6 +21,10 @@ public interface IAudioOutput {
+         void Pause();
+         void Play();
+         void Stop();
++        void DiscardBufferedAudio() { }
++        void NotifyToneStarted(double frequency) { }
++        void NotifyToneEnded(double frequency) { }
++        void NotifyAllTonesEnded() { }
+         long GetPosition();
+ 
+         List<AudioOutputDevice> GetOutputDevices();
 diff --git a/OpenUtau.Core/DocManager.cs b/OpenUtau.Core/DocManager.cs
 index 96b5010..d145333 100644
 --- a/OpenUtau.Core/DocManager.cs
@@ -71,6 +86,33 @@ index 96b5010..d145333 100644
                      foreach (var type in assembly.GetExportedTypes()) {
                          if (!type.IsAbstract && type.IsSubclassOf(typeof(Phonemizer))) {
                              PhonemizerFactory.Get(type);
+diff --git a/OpenUtau.Core/PlaybackManager.cs b/OpenUtau.Core/PlaybackManager.cs
+index c815c0a..5d15948 100644
+--- a/OpenUtau.Core/PlaybackManager.cs
++++ b/OpenUtau.Core/PlaybackManager.cs
+@@ -208,6 +208,8 @@ public void PlayTestSound() {
+ 
+         public void PlayTone(double freq) {
+             toneGenerator.StartTone(freq);
++            AudioOutput.DiscardBufferedAudio();
++            AudioOutput.NotifyToneStarted(freq);
+ 
+             // If nothing is playing, start editing mix
+             if (!OutputActive) {
+@@ -219,10 +221,13 @@ public void PlayTone(double freq) {
+ 
+         public void EndTone(double freq) {
+             toneGenerator.EndTone(freq);
++            AudioOutput.DiscardBufferedAudio();
++            AudioOutput.NotifyToneEnded(freq);
+         }
+ 
+         public void EndAllTones() {
+             toneGenerator.EndAllTones();
++            AudioOutput.NotifyAllTonesEnded();
+         }
+ 
+         public void PlayFile(string file) {
 diff --git a/OpenUtau.Core/Render/RenderEngine.cs b/OpenUtau.Core/Render/RenderEngine.cs
 index 75bc3d3..a6a9c20 100644
 --- a/OpenUtau.Core/Render/RenderEngine.cs
@@ -136,6 +178,57 @@ index 75bc3d3..a6a9c20 100644
                  }
              }
              progress.Clear();
+diff --git a/OpenUtau.Core/Render/VstRenderAdapter.cs b/OpenUtau.Core/Render/VstRenderAdapter.cs
+new file mode 100644
+index 0000000..836c41b
+--- /dev/null
++++ b/OpenUtau.Core/Render/VstRenderAdapter.cs
+@@ -0,0 +1,45 @@
++using System;
++using System.Threading;
++using System.Threading.Tasks;
++using OpenUtau.Core.Ustx;
++
++namespace OpenUtau.Core.Render {
++    public static class VstRenderAdapter {
++        public const int SampleRate = 44100;
++        public const int Channels = 2;
++
++        public static void PrepareProject(UProject project) {
++            if (project == null) throw new ArgumentNullException(nameof(project));
++            project.Validate(new ValidateOptions {
++                SynchronousPhonemizer = true,
++            });
++        }
++
++        public static float[] RenderFrames(
++                UProject project, long startFrame, int frameCount,
++                CancellationToken cancellationToken = default,
++                bool prepareProject = true) {
++            if (project == null) throw new ArgumentNullException(nameof(project));
++            if (startFrame < 0) throw new ArgumentOutOfRangeException(nameof(startFrame));
++            if (frameCount < 0) throw new ArgumentOutOfRangeException(nameof(frameCount));
++            if (frameCount == 0) return Array.Empty<float>();
++            if (prepareProject) PrepareProject(project);
++            var startMs = startFrame * 1000.0 / SampleRate;
++            var endMs = (startFrame + frameCount) * 1000.0 / SampleRate;
++            var startTick = project.timeAxis.MsPosToTickPos(startMs);
++            var endTick = project.timeAxis.MsPosToTickPos(endMs) + 1;
++            CancellationTokenSource renderCancellation = null;
++            using var cancellationRegistration = cancellationToken.Register(
++                () => Volatile.Read(ref renderCancellation)?.Cancel());
++            var renderer = new RenderEngine(
++                project, startTick, endTick, notifications: false);
++            var (mix, _) = renderer.RenderMixdown(
++                TaskScheduler.Default, ref renderCancellation, wait: true);
++            cancellationToken.ThrowIfCancellationRequested();
++            var result = new float[checked(frameCount * Channels)];
++            var samplePosition = checked((int)(startFrame * Channels));
++            mix.Mix(samplePosition, result, 0, result.Length);
++            return result;
++        }
++    }
++}
 diff --git a/OpenUtau.Core/Ustx/UPart.cs b/OpenUtau.Core/Ustx/UPart.cs
 index 0eafb8e..43c5983 100644
 --- a/OpenUtau.Core/Ustx/UPart.cs
@@ -162,6 +255,74 @@ index 0eafb8e..43c5983 100644
              }
              lock (this) {
                  if (phonemizerResponse != null) {
+diff --git a/OpenUtau.Core/Ustx/UTrack.cs b/OpenUtau.Core/Ustx/UTrack.cs
+index d668f0e..bff6db9 100644
+--- a/OpenUtau.Core/Ustx/UTrack.cs
++++ b/OpenUtau.Core/Ustx/UTrack.cs
+@@ -199,7 +199,18 @@ public bool ValidateVoiceColor(out string[] oldColors, out string[] newColors) {
+         }
+ 
+         public void BeforeSave() {
+-            singer = Singer?.Id;
++            // Preserve the serialized identifier when the singer is still
++            // represented by a missing/late-resolving placeholder. Embedded
++            // hosts can load project state before an asynchronously scanned
++            // voicebank is available; replacing that identifier with null
++            // makes the next DAW state snapshot permanently forget the singer.
++            if (Singer == null) {
++                singer = null;
++            } else if (!string.IsNullOrEmpty(Singer.Id)) {
++                singer = Singer.Id;
++            } else if (string.IsNullOrEmpty(singer)) {
++                singer = Singer.Name;
++            }
+             phonemizer = Phonemizer.GetType().FullName;
+             if (Singer != null && Singer.Found && VoiceColorExp != null && VoiceColorExp.options.Length > 0) {
+                 VoiceColorNames = VoiceColorExp.options.ToArray();
+diff --git a/OpenUtau.Core/Util/PathManager.cs b/OpenUtau.Core/Util/PathManager.cs
+index 5a3e08a..4ee8468 100644
+--- a/OpenUtau.Core/Util/PathManager.cs
++++ b/OpenUtau.Core/Util/PathManager.cs
+@@ -14,7 +14,21 @@ namespace OpenUtau.Core {
+ 
+     public class PathManager : SingletonBase<PathManager> {
+         public PathManager() {
+-            RootPath = Path.GetDirectoryName(Assembly.GetEntryAssembly().Location);
++            bool vstSession = Environment.GetEnvironmentVariable("OPENUTAU_VST_SESSION") == "1";
++            string entryLocation = vstSession
++                ? typeof(PathManager).Assembly.Location
++                : Assembly.GetEntryAssembly()?.Location ?? typeof(PathManager).Assembly.Location;
++            RootPath = Path.GetDirectoryName(entryLocation) ?? AppContext.BaseDirectory;
++            string vstDataHome = Environment.GetEnvironmentVariable("OPENUTAU_VST_DATA_HOME");
++            if (!string.IsNullOrWhiteSpace(vstDataHome)) {
++                DataPath = Path.GetFullPath(vstDataHome);
++                string vstCacheHome = Environment.GetEnvironmentVariable("OPENUTAU_VST_CACHE_HOME");
++                CachePath = string.IsNullOrWhiteSpace(vstCacheHome)
++                    ? Path.Combine(DataPath, "Cache")
++                    : Path.GetFullPath(vstCacheHome);
++                HomePathIsAscii = DataPath.All(c => c < 128) && CachePath.All(c => c < 128);
++                return;
++            }
+             if (OS.IsMacOS()) {
+                 string userHome = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                 DataPath = Path.Combine(userHome, "Library", "OpenUtau");
+diff --git a/OpenUtau.Plugin.Builtin/SyllableBasedPhonemizer.cs b/OpenUtau.Plugin.Builtin/SyllableBasedPhonemizer.cs
+index 95ca6df..51cafb8 100644
+--- a/OpenUtau.Plugin.Builtin/SyllableBasedPhonemizer.cs
++++ b/OpenUtau.Plugin.Builtin/SyllableBasedPhonemizer.cs
+@@ -1178,7 +1178,11 @@ protected void ReadDictionaryAndInit() {
+                 return;
+             }
+             dictionaries[GetType()] = null;
+-            if (Testing) {
++            // The desktop app can finish dictionary initialization in the
++            // background and request a later UI-driven project validation.
++            // A VST engine is headless and must make its very first render
++            // deterministic, so initialize dictionaries before returning.
++            if (Testing || Environment.GetEnvironmentVariable("OPENUTAU_VST_SESSION") == "1") {
+                 ReadDictionary(dictionaryName);
+                 Init();
+                 return;
 diff --git a/OpenUtau.Test/Core/Api/PhonemizerRunnerTest.cs b/OpenUtau.Test/Core/Api/PhonemizerRunnerTest.cs
 new file mode 100644
 index 0000000..a135bfc
@@ -237,74 +398,6 @@ index 0000000..a135bfc
 +        }
 +    }
 +}
-diff --git a/OpenUtau.Core/Ustx/UTrack.cs b/OpenUtau.Core/Ustx/UTrack.cs
-index d668f0e..bff6db9 100644
---- a/OpenUtau.Core/Ustx/UTrack.cs
-+++ b/OpenUtau.Core/Ustx/UTrack.cs
-@@ -199,7 +199,18 @@ public bool ValidateVoiceColor(out string[] oldColors, out string[] newColors) {
-         }
- 
-         public void BeforeSave() {
--            singer = Singer?.Id;
-+            // Preserve the serialized identifier when the singer is still
-+            // represented by a missing/late-resolving placeholder. Embedded
-+            // hosts can load project state before an asynchronously scanned
-+            // voicebank is available; replacing that identifier with null
-+            // makes the next DAW state snapshot permanently forget the singer.
-+            if (Singer == null) {
-+                singer = null;
-+            } else if (!string.IsNullOrEmpty(Singer.Id)) {
-+                singer = Singer.Id;
-+            } else if (string.IsNullOrEmpty(singer)) {
-+                singer = Singer.Name;
-+            }
-             phonemizer = Phonemizer.GetType().FullName;
-             if (Singer != null && Singer.Found && VoiceColorExp != null && VoiceColorExp.options.Length > 0) {
-                 VoiceColorNames = VoiceColorExp.options.ToArray();
-diff --git a/OpenUtau.Core/Util/PathManager.cs b/OpenUtau.Core/Util/PathManager.cs
-index 5a3e08a..4ee8468 100644
---- a/OpenUtau.Core/Util/PathManager.cs
-+++ b/OpenUtau.Core/Util/PathManager.cs
-@@ -14,7 +14,21 @@ namespace OpenUtau.Core {
- 
-     public class PathManager : SingletonBase<PathManager> {
-         public PathManager() {
--            RootPath = Path.GetDirectoryName(Assembly.GetEntryAssembly().Location);
-+            bool vstSession = Environment.GetEnvironmentVariable("OPENUTAU_VST_SESSION") == "1";
-+            string entryLocation = vstSession
-+                ? typeof(PathManager).Assembly.Location
-+                : Assembly.GetEntryAssembly()?.Location ?? typeof(PathManager).Assembly.Location;
-+            RootPath = Path.GetDirectoryName(entryLocation) ?? AppContext.BaseDirectory;
-+            string vstDataHome = Environment.GetEnvironmentVariable("OPENUTAU_VST_DATA_HOME");
-+            if (!string.IsNullOrWhiteSpace(vstDataHome)) {
-+                DataPath = Path.GetFullPath(vstDataHome);
-+                string vstCacheHome = Environment.GetEnvironmentVariable("OPENUTAU_VST_CACHE_HOME");
-+                CachePath = string.IsNullOrWhiteSpace(vstCacheHome)
-+                    ? Path.Combine(DataPath, "Cache")
-+                    : Path.GetFullPath(vstCacheHome);
-+                HomePathIsAscii = DataPath.All(c => c < 128) && CachePath.All(c => c < 128);
-+                return;
-+            }
-             if (OS.IsMacOS()) {
-                 string userHome = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-                 DataPath = Path.Combine(userHome, "Library", "OpenUtau");
-diff --git a/OpenUtau.Plugin.Builtin/SyllableBasedPhonemizer.cs b/OpenUtau.Plugin.Builtin/SyllableBasedPhonemizer.cs
-index 95ca6df..51cafb8 100644
---- a/OpenUtau.Plugin.Builtin/SyllableBasedPhonemizer.cs
-+++ b/OpenUtau.Plugin.Builtin/SyllableBasedPhonemizer.cs
-@@ -1178,7 +1178,11 @@ protected void ReadDictionaryAndInit() {
-                 return;
-             }
-             dictionaries[GetType()] = null;
--            if (Testing) {
-+            // The desktop app can finish dictionary initialization in the
-+            // background and request a later UI-driven project validation.
-+            // A VST engine is headless and must make its very first render
-+            // deterministic, so initialize dictionaries before returning.
-+            if (Testing || Environment.GetEnvironmentVariable("OPENUTAU_VST_SESSION") == "1") {
-                 ReadDictionary(dictionaryName);
-                 Init();
-                 return;
 diff --git a/OpenUtau/App.axaml.cs b/OpenUtau/App.axaml.cs
 index e168d04..fbd0e26 100644
 --- a/OpenUtau/App.axaml.cs
@@ -763,54 +856,3 @@ index e895c1d..8be8ad1 100644
          void OnPointerPressed(object? sender, PointerPressedEventArgs args) {
              if (!PianoRollContainer.IsPointerOver && !args.Handled && args.ClickCount == 1) {
                  this.Focus();
-diff --git a/OpenUtau.Core/Render/VstRenderAdapter.cs b/OpenUtau.Core/Render/VstRenderAdapter.cs
-new file mode 100644
-index 0000000..836c41b
---- /dev/null
-+++ b/OpenUtau.Core/Render/VstRenderAdapter.cs
-@@ -0,0 +1,45 @@
-+using System;
-+using System.Threading;
-+using System.Threading.Tasks;
-+using OpenUtau.Core.Ustx;
-+
-+namespace OpenUtau.Core.Render {
-+    public static class VstRenderAdapter {
-+        public const int SampleRate = 44100;
-+        public const int Channels = 2;
-+
-+        public static void PrepareProject(UProject project) {
-+            if (project == null) throw new ArgumentNullException(nameof(project));
-+            project.Validate(new ValidateOptions {
-+                SynchronousPhonemizer = true,
-+            });
-+        }
-+
-+        public static float[] RenderFrames(
-+                UProject project, long startFrame, int frameCount,
-+                CancellationToken cancellationToken = default,
-+                bool prepareProject = true) {
-+            if (project == null) throw new ArgumentNullException(nameof(project));
-+            if (startFrame < 0) throw new ArgumentOutOfRangeException(nameof(startFrame));
-+            if (frameCount < 0) throw new ArgumentOutOfRangeException(nameof(frameCount));
-+            if (frameCount == 0) return Array.Empty<float>();
-+            if (prepareProject) PrepareProject(project);
-+            var startMs = startFrame * 1000.0 / SampleRate;
-+            var endMs = (startFrame + frameCount) * 1000.0 / SampleRate;
-+            var startTick = project.timeAxis.MsPosToTickPos(startMs);
-+            var endTick = project.timeAxis.MsPosToTickPos(endMs) + 1;
-+            CancellationTokenSource renderCancellation = null;
-+            using var cancellationRegistration = cancellationToken.Register(
-+                () => Volatile.Read(ref renderCancellation)?.Cancel());
-+            var renderer = new RenderEngine(
-+                project, startTick, endTick, notifications: false);
-+            var (mix, _) = renderer.RenderMixdown(
-+                TaskScheduler.Default, ref renderCancellation, wait: true);
-+            cancellationToken.ThrowIfCancellationRequested();
-+            var result = new float[checked(frameCount * Channels)];
-+            var samplePosition = checked((int)(startFrame * Channels));
-+            mix.Mix(samplePosition, result, 0, result.Length);
-+            return result;
-+        }
-+    }
-+}

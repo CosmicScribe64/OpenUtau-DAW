@@ -38,17 +38,23 @@ public static class EntryPoints {
     private static nint lastError;
     private static long revision;
     private static MainWindow? mainWindow;
+    private static Control? embeddedContent;
+    private static byte[]? currentSerializedState;
+    private static long activeEditorInstance;
+    private static long currentProjectInstance;
+    private static readonly Dictionary<long, EditorViewState> EditorViewStates = [];
     private static int hostPlaying;
     private static readonly HostTransportViewportPolicy viewportPolicy = new();
     private static VstPreviewAudioOutput? previewAudioOutput;
 
     [UnmanagedCallersOnly(EntryPoint = "OpenUtauVstEditorCreate",
         CallConvs = [typeof(CallConvCdecl)])]
-    public static nint Create(int width, int height) {
+    public static nint Create(int width, int height, long instanceId) {
         EmbeddableControlRoot? root = null;
         var renderingStarted = false;
         try {
             EnsureInitialized();
+            activeEditorInstance = instanceId;
             Log.Information("Creating VST embeddable root at {Width}x{Height}.",
                 width, height);
             root = new EmbeddableControlRoot {
@@ -85,6 +91,7 @@ public static class EntryPoints {
             }
             return handle;
         } catch (Exception ex) {
+            activeEditorInstance = 0;
             if (root is not null) TryDisposeRoot(root, renderingStarted);
             Log.Error(ex, "Failed to create the embedded VST editor.");
             SetLastError(ex.ToString());
@@ -99,6 +106,119 @@ public static class EntryPoints {
     [UnmanagedCallersOnly(EntryPoint = "OpenUtauVstEditorGetRevision",
         CallConvs = [typeof(CallConvCdecl)])]
     public static long GetRevision() => Interlocked.Read(ref revision);
+
+    [UnmanagedCallersOnly(EntryPoint = "OpenUtauVstEditorExecuteUndo",
+        CallConvs = [typeof(CallConvCdecl)])]
+    public static int ExecuteUndo(int redo) {
+        try {
+            if (EmbeddedTextInputFocused()) return 1;
+            if (mainWindow?.DataContext is not MainWindowViewModel viewModel) {
+                return -1;
+            }
+            if (redo != 0) {
+                viewModel.Redo();
+            } else {
+                viewModel.Undo();
+            }
+            return 0;
+        } catch (Exception ex) {
+            SetLastError(ex.ToString());
+            return -1;
+        }
+    }
+
+    [UnmanagedCallersOnly(EntryPoint = "OpenUtauVstEditorExecuteDelete",
+        CallConvs = [typeof(CallConvCdecl)])]
+    public static int ExecuteDelete(int forwardDelete) {
+        try {
+            if (FocusedTextBox() is TextBox textBox) {
+                DeleteText(textBox, forwardDelete != 0);
+                return 0;
+            }
+            var container = mainWindow?.FindControl<ContentControl>(
+                "PianoRollContainer");
+            if ((container?.Content as Control)?.DataContext
+                    is PianoRollViewModel pianoRoll
+                    && pianoRoll.NotesViewModel.Selection.Count > 0) {
+                pianoRoll.Delete();
+                return 0;
+            }
+            if (mainWindow?.DataContext is MainWindowViewModel viewModel) {
+                viewModel.TracksViewModel.DeleteSelectedParts();
+                return 0;
+            }
+            return -1;
+        } catch (Exception ex) {
+            SetLastError(ex.ToString());
+            return -1;
+        }
+    }
+
+    [UnmanagedCallersOnly(EntryPoint = "OpenUtauVstEditorIsTextInputFocused",
+        CallConvs = [typeof(CallConvCdecl)])]
+    public static int IsTextInputFocused() {
+        try {
+            return EmbeddedTextInputFocused() ? 1 : 0;
+        } catch (Exception ex) {
+            SetLastError(ex.ToString());
+            return 0;
+        }
+    }
+
+    private static void DeleteText(TextBox textBox, bool forwardDelete) {
+        var text = textBox.Text ?? string.Empty;
+        var selectionStart = Math.Min(
+            textBox.SelectionStart, textBox.SelectionEnd);
+        var selectionEnd = Math.Max(
+            textBox.SelectionStart, textBox.SelectionEnd);
+        selectionStart = Math.Clamp(selectionStart, 0, text.Length);
+        selectionEnd = Math.Clamp(selectionEnd, selectionStart, text.Length);
+
+        if (selectionStart == selectionEnd) {
+            if (forwardDelete) {
+                if (selectionEnd >= text.Length) return;
+                selectionEnd++;
+                if (selectionEnd < text.Length
+                        && char.IsHighSurrogate(text[selectionEnd - 1])
+                        && char.IsLowSurrogate(text[selectionEnd])) {
+                    selectionEnd++;
+                }
+            } else {
+                if (selectionStart == 0) return;
+                selectionStart--;
+                if (selectionStart > 0
+                        && char.IsLowSurrogate(text[selectionStart])
+                        && char.IsHighSurrogate(text[selectionStart - 1])) {
+                    selectionStart--;
+                }
+            }
+        }
+
+        textBox.Text = text.Remove(
+            selectionStart, selectionEnd - selectionStart);
+        textBox.CaretIndex = selectionStart;
+        textBox.SelectionStart = selectionStart;
+        textBox.SelectionEnd = selectionStart;
+    }
+
+    private static TextBox? FocusedTextBox() {
+        EmbeddableControlRoot? root;
+        lock (Gate) {
+            root = Roots.Values.FirstOrDefault();
+        }
+        return root?.FocusManager?.GetFocusedElement() as TextBox;
+    }
+
+    private static bool EmbeddedTextInputFocused() {
+        EmbeddableControlRoot? root;
+        lock (Gate) {
+            root = Roots.Values.FirstOrDefault();
+        }
+        var focused = root?.FocusManager?.GetFocusedElement();
+        return focused is TextBox { IsEnabled: true, IsEffectivelyVisible: true }
+            or ComboBox
+            or ComboBoxItem;
+    }
 
     [UnmanagedCallersOnly(EntryPoint = "OpenUtauVstEditorCopyState",
         CallConvs = [typeof(CallConvCdecl)])]
@@ -118,6 +238,24 @@ public static class EntryPoints {
         CallConvs = [typeof(CallConvCdecl)])]
     public static int GetPreviewState() =>
         previewAudioOutput?.PlaybackState == NAudio.Wave.PlaybackState.Playing ? 1 : 0;
+
+    [UnmanagedCallersOnly(EntryPoint = "OpenUtauVstEditorGetPreviewRevision",
+        CallConvs = [typeof(CallConvCdecl)])]
+    public static long GetPreviewRevision() =>
+        previewAudioOutput?.BufferRevision ?? 0;
+
+    [UnmanagedCallersOnly(EntryPoint = "OpenUtauVstEditorGetPreviewTone",
+        CallConvs = [typeof(CallConvCdecl)])]
+    public static unsafe int GetPreviewTone(double* frequency, long* revision) {
+        if (previewAudioOutput is null || frequency == null || revision == null) {
+            return -1;
+        }
+        var state = previewAudioOutput.CopyToneState(
+            out var currentFrequency, out var currentRevision);
+        *frequency = currentFrequency;
+        *revision = currentRevision;
+        return state;
+    }
 
     [UnmanagedCallersOnly(EntryPoint = "OpenUtauVstEditorCopyPreview",
         CallConvs = [typeof(CallConvCdecl)])]
@@ -142,8 +280,16 @@ public static class EntryPoints {
     public static unsafe int SetState(byte* source, int size) {
         try {
             if (source == null || size <= 0 || size > 256 * 1024 * 1024) return -1;
-            var text = new UTF8Encoding(false, true).GetString(
-                new ReadOnlySpan<byte>(source, size));
+            var bytes = new ReadOnlySpan<byte>(source, size).ToArray();
+            lock (Gate) {
+                if (activeEditorInstance == currentProjectInstance
+                        && embeddedContent is not null
+                        && currentSerializedState is not null
+                        && bytes.AsSpan().SequenceEqual(currentSerializedState)) {
+                    return 0;
+                }
+            }
+            var text = new UTF8Encoding(false, true).GetString(bytes);
             var project = Yaml.DefaultDeserializer.Deserialize<UProject>(text)
                 ?? throw new InvalidDataException("USTX state did not contain a project.");
             Ustx.AddDefaultExpressions(project);
@@ -152,8 +298,10 @@ public static class EntryPoints {
             project.FilePath = string.Empty;
             project.Saved = true;
             DocManager.Inst.ExecuteCmd(new LoadProjectNotification(project));
-            if (mainWindow?.DataContext is MainWindowViewModel viewModel) {
-                viewModel.Page = 1;
+            currentProjectInstance = activeEditorInstance;
+            RestoreEditorViewState(activeEditorInstance);
+            lock (Gate) {
+                currentSerializedState = bytes;
             }
             Interlocked.Increment(ref revision);
             return 0;
@@ -252,6 +400,8 @@ public static class EntryPoints {
                 if (Roots.Remove(handle, out var found)) root = found;
             }
             if (root is null) return;
+            CaptureEditorViewState(activeEditorInstance);
+            activeEditorInstance = 0;
             TryDisposeRoot(root, renderingStarted: true);
         } catch (Exception ex) {
             // An exception must never escape an UnmanagedCallersOnly method
@@ -270,6 +420,12 @@ public static class EntryPoints {
             } catch (Exception ex) {
                 Log.Warning(ex, "Failed to stop VST editor rendering during cleanup.");
             }
+        }
+        // Keep the OpenUtau control tree alive between DAW editor close/open
+        // cycles. Reparenting it into the next embeddable root preserves the
+        // piano-roll page, selection, zoom, scroll position, and pane sizes.
+        if (ReferenceEquals(root.Content, embeddedContent)) {
+            root.Content = null;
         }
         try {
             root.Dispose();
@@ -338,6 +494,10 @@ public static class EntryPoints {
     private static Control BuildOpenUtauView() {
         Log.Information("Building VST editor with {Count} phonemizers",
             PhonemizerFactory.GetAll().Length);
+        if (embeddedContent is not null) {
+            Log.Information("Reusing the existing OpenUtau editor view.");
+            return embeddedContent;
+        }
         var window = new MainWindow();
         Log.Information("Created OpenUtau window shell for VST embedding.");
         var content = window.Content as Control
@@ -356,7 +516,8 @@ public static class EntryPoints {
                 () => Volatile.Read(ref hostPlaying) != 0);
         }
         mainWindow = window;
-        return content;
+        embeddedContent = content;
+        return embeddedContent;
     }
 
     private static byte[] SaveProject() {
@@ -364,11 +525,83 @@ public static class EntryPoints {
         project.ustxVersion = Ustx.kUstxVersion;
         project.BeforeSave();
         try {
-            return Encoding.UTF8.GetBytes(Yaml.DefaultSerializer.Serialize(project));
+            var bytes = Encoding.UTF8.GetBytes(
+                Yaml.DefaultSerializer.Serialize(project));
+            lock (Gate) {
+                currentSerializedState = bytes;
+            }
+            return bytes;
         } finally {
             project.AfterSave();
         }
     }
+
+    private static PianoRollViewModel? CurrentPianoRoll() {
+        var container = mainWindow?.FindControl<ContentControl>(
+            "PianoRollContainer");
+        return (container?.Content as Control)?.DataContext
+            as PianoRollViewModel;
+    }
+
+    private static void CaptureEditorViewState(long instanceId) {
+        if (instanceId == 0
+                || mainWindow?.DataContext is not MainWindowViewModel main
+                || CurrentPianoRoll() is not PianoRollViewModel piano) {
+            return;
+        }
+        var notes = piano.NotesViewModel;
+        var partIndex = notes.Part is null
+            ? -1 : DocManager.Inst.Project.parts.IndexOf(notes.Part);
+        var tracks = main.TracksViewModel;
+        EditorViewStates[instanceId] = new EditorViewState(
+            main.Page, main.ShowPianoRoll, partIndex,
+            tracks.TickWidth, tracks.TrackHeight,
+            tracks.TickOffset, tracks.TrackOffset,
+            notes.TickWidth, notes.TrackHeight,
+            notes.TickOffset, notes.TrackOffset);
+    }
+
+    private static void RestoreEditorViewState(long instanceId) {
+        if (mainWindow?.DataContext is not MainWindowViewModel main) return;
+        if (!EditorViewStates.TryGetValue(instanceId, out var state)) {
+            main.Page = 1;
+            return;
+        }
+        var tracks = main.TracksViewModel;
+        tracks.TickWidth = state.TracksTickWidth;
+        tracks.TrackHeight = state.TracksTrackHeight;
+        tracks.TickOffset = state.TracksTickOffset;
+        tracks.TrackOffset = state.TracksTrackOffset;
+        main.Page = state.Page;
+        main.ShowPianoRoll = state.ShowPianoRoll;
+
+        var project = DocManager.Inst.Project;
+        if (state.PartIndex < 0 || state.PartIndex >= project.parts.Count
+                || project.parts[state.PartIndex] is not UVoicePart part) {
+            return;
+        }
+        DocManager.Inst.ExecuteCmd(new LoadPartNotification(
+            part, project, part.position + (int)state.NotesTickOffset));
+        if (CurrentPianoRoll() is not PianoRollViewModel piano) return;
+        var notes = piano.NotesViewModel;
+        notes.TickWidth = state.NotesTickWidth;
+        notes.TrackHeight = state.NotesTrackHeight;
+        notes.TickOffset = state.NotesTickOffset;
+        notes.TrackOffset = state.NotesTrackOffset;
+    }
+
+    private sealed record EditorViewState(
+        int Page,
+        bool ShowPianoRoll,
+        int PartIndex,
+        double TracksTickWidth,
+        double TracksTrackHeight,
+        double TracksTickOffset,
+        double TracksTrackOffset,
+        double NotesTickWidth,
+        double NotesTrackHeight,
+        double NotesTickOffset,
+        double NotesTrackOffset);
 
     private static void SetLastError(string message) {
         lock (Gate) {

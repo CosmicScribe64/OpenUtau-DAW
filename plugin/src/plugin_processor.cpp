@@ -16,6 +16,11 @@ namespace {
 
 void moduleAnchor() {}
 
+std::uint64_t nextPluginInstanceId() {
+  static std::atomic<std::uint64_t> next{1};
+  return next.fetch_add(1, std::memory_order_relaxed);
+}
+
 juce::File currentPluginModule() {
 #if defined(_WIN32)
   HMODULE module = nullptr;
@@ -38,12 +43,19 @@ juce::File currentPluginModule() {
 namespace openutau::vst {
 
 PluginProcessor::PluginProcessor()
-    : AudioProcessor(BusesProperties().withOutput("Output", juce::AudioChannelSet::stereo(), true)) {}
+    : AudioProcessor(BusesProperties().withOutput(
+          "Output", juce::AudioChannelSet::stereo(), true)),
+      instanceId_(nextPluginInstanceId()) {}
 
 PluginProcessor::~PluginProcessor() = default;
 
-void PluginProcessor::prepareToPlay(const double sampleRate, const int) {
+void PluginProcessor::prepareToPlay(
+    const double sampleRate, const int maximumExpectedSamplesPerBlock) {
   sampleRate_ = sampleRate;
+  editorTone_.setSampleRate(sampleRate);
+  editorPreviewBlockFrames_.store(
+      static_cast<std::size_t>(std::max(1, maximumExpectedSamplesPerBlock)),
+      std::memory_order_relaxed);
   fallbackSamplePosition_ = 0;
   lastHostTempo_ = std::numeric_limits<double>::quiet_NaN();
   lastHostNumerator_ = 0;
@@ -120,6 +132,11 @@ bool PluginProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const {
 void PluginProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) {
   juce::ScopedNoDenormals noDenormals;
   const auto frames = static_cast<std::size_t>(buffer.getNumSamples());
+  auto observedBlock = editorPreviewBlockFrames_.load(std::memory_order_relaxed);
+  while (frames > observedBlock
+         && !editorPreviewBlockFrames_.compare_exchange_weak(
+             observedBlock, frames, std::memory_order_relaxed)) {
+  }
   buffer.clear();
   std::int64_t hostStartSample = fallbackSamplePosition_;
   bool playing = false;
@@ -205,43 +222,104 @@ void PluginProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiB
     consumed += wanted;
   }
 
-  // Editor-local audition is produced off-thread and is audible only while
-  // the DAW transport is stopped. This keeps a click on OpenUtau's Play button
-  // inside the normal VST output/mixer path without opening a second hardware
-  // device or doubling host-controlled playback.
-  if (!playing && editorPreviewActive_.load(std::memory_order_acquire)) {
+  const auto toneRevision = editorToneRevision_.load(std::memory_order_acquire);
+  if (toneRevision != editorToneObservedRevision_) {
+    editorToneObservedRevision_ = toneRevision;
+    const auto previousToneState = editorToneObservedState_;
+    editorToneObservedState_ = editorToneState_.load(std::memory_order_relaxed);
+    if (editorToneObservedState_ > 0) {
+      editorTone_.start(editorToneFrequency_.load(std::memory_order_relaxed));
+    } else if (editorToneObservedState_ == 0) {
+      // A quick click can begin and end between editor timer ticks. If no held
+      // note was observed, keep that click audible as a short one-shot.
+      if (previousToneState == 1) {
+        editorTone_.release();
+      } else {
+        editorTone_.startOneShot(
+            editorToneFrequency_.load(std::memory_order_relaxed));
+      }
+    } else if (editorToneObservedState_ < 0) {
+      editorTone_.reset();
+    }
+  }
+
+  // Piano-key audition is generated in the audio callback. Passing this
+  // simple tone through the editor timer caused gaps with large host blocks.
+  if (!playing && editorToneObservedState_ >= 0) {
+    for (std::size_t frame = 0; frame < frames; ++frame) {
+      const auto sample = editorTone_.nextSample();
+      buffer.addSample(0, static_cast<int>(frame), sample);
+      buffer.addSample(1, static_cast<int>(frame), sample);
+    }
+    editorPreviewLastLeft_ = 0.0f;
+    editorPreviewLastRight_ = 0.0f;
+    editorPreviewFadeRemaining_ = 0;
+  // OpenUtau playback still comes through the editor bridge and normal VST
+  // outputs, without opening a second hardware device.
+  } else if (!playing && editorPreviewActive_.load(std::memory_order_acquire)) {
     const auto epoch = editorPreviewEpoch_.load(std::memory_order_acquire);
     if (editorPreviewObservedEpoch_ != epoch) {
       editorPreviewObservedEpoch_ = epoch;
       editorPreviewReadFrame_ = 0;
       editorPreviewFadeRemaining_ = 128;
+      editorPreviewFadeStartLeft_ = editorPreviewLastLeft_;
+      editorPreviewFadeStartRight_ = editorPreviewLastRight_;
     }
     std::size_t previewOffset = 0;
     while (previewOffset < frames) {
       const auto wanted = std::min(chunkFrames, frames - previewOffset);
       const auto read = editorPreviewRing_.readTagged(
           scratch.data(), wanted, epoch, editorPreviewReadFrame_);
-      for (std::size_t frame = 0; frame < read; ++frame) {
-        auto gain = 1.0f;
+      for (std::size_t frame = 0; frame < wanted; ++frame) {
+        if (frame >= read && editorPreviewFadeRemaining_ == 0) break;
+        const auto nextLeft = frame < read ? scratch[frame * 2] : 0.0f;
+        const auto nextRight = frame < read ? scratch[frame * 2 + 1] : 0.0f;
+        auto left = nextLeft;
+        auto right = nextRight;
         if (editorPreviewFadeRemaining_ > 0) {
-          gain = static_cast<float>(128 - editorPreviewFadeRemaining_)
-              / 128.0f;
+          const auto mix = static_cast<float>(
+              128 - editorPreviewFadeRemaining_ + 1) / 128.0f;
+          left = editorPreviewFadeStartLeft_ * (1.0f - mix) + nextLeft * mix;
+          right = editorPreviewFadeStartRight_ * (1.0f - mix) + nextRight * mix;
           --editorPreviewFadeRemaining_;
         }
         buffer.addSample(0, static_cast<int>(previewOffset + frame),
-                         scratch[frame * 2] * gain);
+                         left);
         buffer.addSample(1, static_cast<int>(previewOffset + frame),
-                         scratch[frame * 2 + 1] * gain);
+                         right);
+        editorPreviewLastLeft_ = left;
+        editorPreviewLastRight_ = right;
       }
       editorPreviewReadFrame_ += static_cast<std::int64_t>(read);
       previewOffset += wanted;
       if (read < wanted) break;
     }
+  } else {
+    editorPreviewLastLeft_ = 0.0f;
+    editorPreviewLastRight_ = 0.0f;
+    editorPreviewFadeRemaining_ = 0;
   }
 }
 
 std::size_t PluginProcessor::editorPreviewWritableFrames() const noexcept {
-  return editorPreviewRing_.writableFrames();
+  // Hold enough audio to cover a stalled editor timer and FL Studio's larger
+  // callback blocks. Note changes explicitly discard this queue.
+  const auto sampleRate = hostTransportSampleRate_.load(std::memory_order_relaxed);
+  const auto timedFrames = static_cast<std::size_t>(std::clamp(
+      sampleRate * 0.250, 512.0,
+      static_cast<double>(editorPreviewCapacityFrames)));
+  const auto blockFrames = editorPreviewBlockFrames_.load(
+      std::memory_order_relaxed);
+  const auto guardedBlockFrames = blockFrames > editorPreviewCapacityFrames / 2
+      ? editorPreviewCapacityFrames
+      : blockFrames * 2;
+  const auto latencyFrames = std::min(
+      editorPreviewCapacityFrames,
+      std::max(timedFrames, guardedBlockFrames));
+  const auto readable = editorPreviewRing_.readableFrames();
+  if (readable >= latencyFrames) return 0;
+  return std::min(
+      editorPreviewRing_.writableFrames(), latencyFrames - readable);
 }
 
 void PluginProcessor::updateEditorPreview(
@@ -258,6 +336,16 @@ void PluginProcessor::updateEditorPreview(
   const auto written = editorPreviewRing_.writeTagged(
       interleaved, frames, editorPreviewWriterEpoch_, editorPreviewWriteFrame_);
   editorPreviewWriteFrame_ += static_cast<std::int64_t>(written);
+}
+
+void PluginProcessor::updateEditorTone(
+    const double frequency, const int state,
+    const std::uint64_t revision) noexcept {
+  editorToneFrequency_.store(
+      std::isfinite(frequency) && frequency > 0.0 ? frequency : 440.0,
+      std::memory_order_relaxed);
+  editorToneState_.store(std::clamp(state, -1, 1), std::memory_order_relaxed);
+  editorToneRevision_.store(revision, std::memory_order_release);
 }
 
 PluginProcessor::HostTransportSnapshot PluginProcessor::hostTransportSnapshot() const noexcept {

@@ -40,6 +40,14 @@ add_executable(audio_ring_buffer_tests tests/audio_ring_buffer_tests.cpp)
 target_link_libraries(audio_ring_buffer_tests PRIVATE openutau_audio_bridge)
 add_test(NAME audio_ring_buffer_tests COMMAND audio_ring_buffer_tests)
 
+add_executable(preview_tone_tests tests/preview_tone_tests.cpp)
+target_include_directories(preview_tone_tests PRIVATE include)
+target_compile_options(preview_tone_tests PRIVATE
+  $<$<CXX_COMPILER_ID:MSVC>:/W4 /WX>
+  $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra -Wpedantic -Werror>
+)
+add_test(NAME preview_tone_tests COMMAND preview_tone_tests)
+
 add_executable(engine_client_tests tests/engine_client_tests.cpp)
 target_link_libraries(engine_client_tests PRIVATE openutau_audio_bridge)
 add_test(NAME engine_client_tests COMMAND engine_client_tests
