@@ -11,7 +11,7 @@ Run the suite with:
 docker compose run --rm dev ./scripts/ci.sh
 ```
 
-The suite last passed on 2026-08-19, including all six CTest cases. It checks:
+The suite last passed on 2026-08-20, including all seven CTest cases. It checks:
 
 - replay of the VST adapter patch against the pinned OpenUtau commit;
 - protocol and project-state round trips;
@@ -29,14 +29,14 @@ needs to be distributed.
 
 ## macOS arm64 package
 
-The alpha package was rebuilt on 2026-08-19 with AppleClang and JUCE 8.0.15.
+The alpha package was rebuilt on 2026-08-20 with AppleClang and JUCE 8.0.15.
 It is ad-hoc signed and not notarized.
 
 To check a package:
 
 ```sh
 scripts/verify-macos-package.sh \
-  artifacts/OpenUtau-DAW-v0.1.0-alpha.2-macos-arm64.zip
+  artifacts/OpenUtau-DAW-v0.1.0-alpha.3-macos-arm64.zip
 ```
 
 The script verifies the archive checksum, manifest, bundle signature,
@@ -47,13 +47,17 @@ NuGet dependency inventory.
 ## FL Studio on macOS
 
 The packaged arm64 build was installed and checked in FL Studio 2026 on
-2026-08-19. The test covered:
+2026-08-20. The test covered:
 
 - plug-in discovery and editor opening;
 - transport, tempo, time signature, and keyboard shortcuts;
 - preview and singing audio through an FL mixer insert;
 - FLP save, quit, reopen, and project-state restoration;
 - two processor instances with one editor visible at a time;
+- returning each instance to its own piano-roll view after closing or swapping
+  editors;
+- immediate piano-key audition, text editing, note deletion, and resize
+  cursors;
 - offline WAV export;
 - recovery after a sidecar exit, timeout, and missing engine-host DLL.
 

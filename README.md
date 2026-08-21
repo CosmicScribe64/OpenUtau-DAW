@@ -36,8 +36,10 @@ Installation notes:
 - OpenUtau project data is saved in the VST state, so it travels with the DAW
   project.
 - Multiple instances keep separate audio and project state.
+- Closing an editor, or moving between instances, returns to that instance's
+  previous piano-roll view.
 - Common transport shortcuts are passed back to FL Studio. Editor shortcuts
-  such as undo, redo, and open stay in OpenUtau.
+  such as undo, redo, delete, and open stay in OpenUtau.
 
 ## Limitations
 

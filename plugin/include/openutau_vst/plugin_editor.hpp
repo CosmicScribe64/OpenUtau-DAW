@@ -39,6 +39,10 @@ private:
 #endif
   static constexpr std::size_t previewScratchFrames = 1u << 14;
   std::array<float, previewScratchFrames * 2> previewScratch_{};
+  std::uint64_t previewRevision_{};
+  std::uint64_t toneRevision_{};
+  unsigned timerTick_{};
+  bool editorFocusEstablished_{};
   bool embeddedActive_{};
 #endif
 

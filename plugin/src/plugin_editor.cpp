@@ -38,7 +38,8 @@ PluginEditor::PluginEditor(PluginProcessor& owner)
   setResizeLimits(420, 180, 1600, 1000);
   setSize(640, 240);
 #if JUCE_MAC || JUCE_WINDOWS
-  if (auto* view = managedEditor_.create(1136, 768)) {
+  if (auto* view = managedEditor_.create(
+          1136, 768, processor_.instanceId())) {
 #if JUCE_MAC
     embeddedView_.setView(view);
 #else
@@ -69,9 +70,9 @@ PluginEditor::PluginEditor(PluginProcessor& owner)
                     juce::dontSendNotification);
   }
 #endif
-  // Transport animation must be visibly smooth, but all communication stays
-  // on the host message thread and never enters the audio callback.
-  startTimerHz(30);
+  // Preview audio is copied often enough to feel immediate. Project-state
+  // polling remains at 30 Hz below.
+  startTimerHz(60);
 }
 
 PluginEditor::~PluginEditor() {
@@ -79,6 +80,7 @@ PluginEditor::~PluginEditor() {
   if (embeddedActive_) {
     synchroniseProjectState();
     processor_.updateEditorPreview(nullptr, 0, false);
+    processor_.updateEditorTone(0.0, -1, toneRevision_ + 1);
   }
 #if JUCE_MAC
   embeddedView_.setView(nullptr);
@@ -134,6 +136,11 @@ void PluginEditor::resized() {
 void PluginEditor::timerCallback() {
 #if JUCE_MAC || JUCE_WINDOWS
   if (embeddedActive_) {
+#if JUCE_MAC
+    if (!editorFocusEstablished_) {
+      editorFocusEstablished_ = managedEditor_.focus();
+    }
+#endif
     const auto transport = processor_.hostTransportSnapshot();
     managedEditor_.setHostTransport(
         transport.projectSample, transport.sampleRate,
@@ -142,15 +149,26 @@ void PluginEditor::timerCallback() {
         transport.timeSignatureDenominator, transport.playing);
     std::size_t copiedPreviewFrames = 0;
     bool previewActive = false;
+    std::uint64_t previewRevision = 0;
     const auto previewCapacity = std::min(
         previewScratchFrames, processor_.editorPreviewWritableFrames());
     if (managedEditor_.pullPreview(
             previewScratch_.data(), previewCapacity,
-            copiedPreviewFrames, previewActive)) {
+            copiedPreviewFrames, previewActive, previewRevision)) {
+      if (previewRevision != previewRevision_) {
+        processor_.updateEditorPreview(nullptr, 0, false);
+        previewRevision_ = previewRevision;
+      }
       processor_.updateEditorPreview(
           previewScratch_.data(), copiedPreviewFrames, previewActive);
     }
-    synchroniseProjectState();
+    double toneFrequency = 0.0;
+    std::uint64_t toneRevision = 0;
+    const auto toneState = managedEditor_.previewToneState(
+        toneFrequency, toneRevision);
+    toneRevision_ = toneRevision;
+    processor_.updateEditorTone(toneFrequency, toneState, toneRevision);
+    if ((++timerTick_ & 1u) == 0) synchroniseProjectState();
     return;
   }
   if (!embeddedActive_ && managedEditor_.lastError().isNotEmpty()) {

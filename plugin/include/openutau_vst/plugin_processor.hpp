@@ -1,6 +1,7 @@
 #pragma once
 
 #include "openutau_vst/engine_bridge.hpp"
+#include "openutau_vst/preview_tone.hpp"
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include <atomic>
@@ -53,9 +54,12 @@ public:
   [[nodiscard]] std::uint64_t underrunCount() const noexcept { return engineBridge_.underruns(); }
   [[nodiscard]] juce::String engineError() const { return engineBridge_.lastError(); }
   [[nodiscard]] HostTransportSnapshot hostTransportSnapshot() const noexcept;
+  [[nodiscard]] std::uint64_t instanceId() const noexcept { return instanceId_; }
   [[nodiscard]] std::size_t editorPreviewWritableFrames() const noexcept;
   void updateEditorPreview(const float* interleaved, std::size_t frames,
                            bool active) noexcept;
+  void updateEditorTone(double frequency, int state,
+                        std::uint64_t revision) noexcept;
   bool loadProjectFile(const juce::File& file);
   [[nodiscard]] juce::MemoryBlock projectStateSnapshot() const;
   void setEmbeddedProjectState(const void* data, std::size_t size,
@@ -67,6 +71,7 @@ private:
   static constexpr std::uint32_t stateMagic = 0x4f555633; // OUV3
   static constexpr std::uint32_t stateVersion = 1;
   EngineBridge engineBridge_;
+  const std::uint64_t instanceId_;
   juce::MemoryBlock projectState_;
   mutable juce::CriticalSection stateMutex_;
   double sampleRate_{44100.0};
@@ -91,12 +96,23 @@ private:
   AudioRingBuffer editorPreviewRing_{editorPreviewCapacityFrames, 2};
   std::atomic<std::uint64_t> editorPreviewEpoch_{1};
   std::atomic<bool> editorPreviewActive_{false};
+  std::atomic<std::size_t> editorPreviewBlockFrames_{512};
   std::uint64_t editorPreviewWriterEpoch_{1};
   std::int64_t editorPreviewWriteFrame_{0};
   bool editorPreviewWriterActive_{false};
   std::uint64_t editorPreviewObservedEpoch_{0};
   std::int64_t editorPreviewReadFrame_{0};
   std::size_t editorPreviewFadeRemaining_{128};
+  float editorPreviewFadeStartLeft_{};
+  float editorPreviewFadeStartRight_{};
+  float editorPreviewLastLeft_{};
+  float editorPreviewLastRight_{};
+  std::atomic<double> editorToneFrequency_{440.0};
+  std::atomic<int> editorToneState_{-1};
+  std::atomic<std::uint64_t> editorToneRevision_{0};
+  std::uint64_t editorToneObservedRevision_{};
+  int editorToneObservedState_{-1};
+  PreviewTone editorTone_;
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PluginProcessor)
 };

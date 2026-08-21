@@ -46,11 +46,22 @@ Require(!expiredViewportPolicy.PreserveViewport(false, false, true),
 
 using var output = new VstPreviewAudioOutput();
 output.SetSampleRate(48000);
+var initialToneRevision = output.ToneRevision;
+output.NotifyToneStarted(440.0);
+Require(output.CopyToneState(out var toneFrequency, out var toneRevision) == 1,
+    "Piano-key audition did not start.");
+Require(toneFrequency == 440.0 && toneRevision == initialToneRevision + 1,
+    "Piano-key audition published the wrong pitch or revision.");
+output.NotifyToneEnded(440.0);
+Require(output.CopyToneState(out _, out _) == 0,
+    "Piano-key audition did not release.");
 output.Init(new SignalGenerator(44100, 1) {
     Frequency = 440,
     Gain = 0.25,
     Type = SignalGeneratorType.Sin,
 }.Take(TimeSpan.FromMilliseconds(250)));
+Require(output.CopyToneState(out _, out _) == -1,
+    "Normal OpenUtau playback remained in piano-key audition mode.");
 
 Require(output.GetOutputDevices().Count == 0,
     "VST preview exposed a hardware audio device.");
@@ -76,6 +87,29 @@ Require(copiedFrames >= 4800,
 Require(nonSilent, "Device-free preview returned silence.");
 Require(output.GetPosition() > 0,
     "Preview consumption did not advance its playback clock.");
+
+// Unbounded preview sources must not fill the entire ring while the DAW is
+// stopped. A bounded queue also makes explicit buffer resets take effect soon.
+output.Stop();
+output.Init(new SignalGenerator(48000, 2) {
+    Frequency = 440,
+    Gain = 0.25,
+    Type = SignalGeneratorType.Sin,
+});
+output.Play();
+await Task.Delay(100);
+var queuedAuditionFrames = output.CopyTo(new float[16384 * 2]);
+Require(queuedAuditionFrames is > 0 and <= 12000,
+    $"Piano-roll audition buffered {queuedAuditionFrames} frames instead of staying within its safety window.");
+var auditionRevision = output.BufferRevision;
+output.DiscardBufferedAudio();
+Require(output.BufferRevision == auditionRevision + 1,
+    "Piano-roll audition did not publish a buffer reset.");
+Require(output.PlaybackState == PlaybackState.Playing,
+    "Piano-roll audition stopped after clearing old audio.");
+await Task.Delay(10);
+Require(output.CopyTo(buffer) >= 0,
+    "Piano-roll audition did not refill after clearing old audio.");
 
 output.Pause();
 Require(output.CopyTo(buffer) == -1,

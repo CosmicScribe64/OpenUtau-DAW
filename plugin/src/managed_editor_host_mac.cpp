@@ -15,15 +15,19 @@ using get_delegate_fn = int32_t (*)(hostfxr_handle, int32_t, void**);
 using close_runtime_fn = int32_t (*)(hostfxr_handle);
 using load_assembly_fn = int32_t (*)(const char*, const char*, const char*,
                                      const char*, void*, void**);
-using create_editor_fn = void* (*)(int32_t, int32_t);
+using create_editor_fn = void* (*)(int32_t, int32_t, int64_t);
 using destroy_editor_fn = void (*)(void*);
 using get_error_fn = const char* (*)();
 using get_revision_fn = int64_t (*)();
+using execute_undo_fn = int32_t (*)(int32_t);
+using execute_delete_fn = int32_t (*)(int32_t);
 using copy_state_fn = int32_t (*)(std::uint8_t*, int32_t);
 using set_state_fn = int32_t (*)(const std::uint8_t*, int32_t);
 using set_host_transport_fn = int32_t (*)(
     int64_t, double, double, double, int32_t, int32_t, int32_t);
 using get_preview_state_fn = int32_t (*)();
+using get_preview_revision_fn = int64_t (*)();
+using get_preview_tone_fn = int32_t (*)(double*, int64_t*);
 using copy_preview_fn = int32_t (*)(float*, int32_t);
 
 struct hostfxr_initialize_parameters {
@@ -51,10 +55,14 @@ struct Runtime final {
   destroy_editor_fn destroy{};
   get_error_fn getError{};
   get_revision_fn getRevision{};
+  execute_undo_fn executeUndo{};
+  execute_delete_fn executeDelete{};
   copy_state_fn copyState{};
   set_state_fn setState{};
   set_host_transport_fn setHostTransport{};
   get_preview_state_fn getPreviewState{};
+  get_preview_revision_fn getPreviewRevision{};
+  get_preview_tone_fn getPreviewTone{};
   copy_preview_fn copyPreview{};
   juce::String error;
 
@@ -152,10 +160,14 @@ struct Runtime final {
     void* rawDestroy{};
     void* rawGetError{};
     void* rawGetRevision{};
+    void* rawExecuteUndo{};
+    void* rawExecuteDelete{};
     void* rawCopyState{};
     void* rawSetState{};
     void* rawSetHostTransport{};
     void* rawGetPreviewState{};
+    void* rawGetPreviewRevision{};
+    void* rawGetPreviewTone{};
     void* rawCopyPreview{};
     const auto createResult = loadAssembly(
         assemblyPath.c_str(), typeName, "Create", unmanagedCallersOnly, nullptr,
@@ -169,6 +181,12 @@ struct Runtime final {
     const auto revisionResult = loadAssembly(
         assemblyPath.c_str(), typeName, "GetRevision", unmanagedCallersOnly, nullptr,
         &rawGetRevision);
+    const auto undoResult = loadAssembly(
+        assemblyPath.c_str(), typeName, "ExecuteUndo", unmanagedCallersOnly, nullptr,
+        &rawExecuteUndo);
+    const auto deleteResult = loadAssembly(
+        assemblyPath.c_str(), typeName, "ExecuteDelete", unmanagedCallersOnly,
+        nullptr, &rawExecuteDelete);
     const auto copyResult = loadAssembly(
         assemblyPath.c_str(), typeName, "CopyState", unmanagedCallersOnly, nullptr,
         &rawCopyState);
@@ -181,18 +199,32 @@ struct Runtime final {
     const auto previewStateResult = loadAssembly(
         assemblyPath.c_str(), typeName, "GetPreviewState", unmanagedCallersOnly,
         nullptr, &rawGetPreviewState);
+    const auto previewRevisionResult = loadAssembly(
+        assemblyPath.c_str(), typeName, "GetPreviewRevision", unmanagedCallersOnly,
+        nullptr, &rawGetPreviewRevision);
+    const auto previewToneResult = loadAssembly(
+        assemblyPath.c_str(), typeName, "GetPreviewTone", unmanagedCallersOnly,
+        nullptr, &rawGetPreviewTone);
     const auto previewCopyResult = loadAssembly(
         assemblyPath.c_str(), typeName, "CopyPreview", unmanagedCallersOnly,
         nullptr, &rawCopyPreview);
     if (createResult != 0 || destroyResult != 0 || rawCreate == nullptr
-        || errorResult != 0 || revisionResult != 0 || copyResult != 0
+        || errorResult != 0 || revisionResult != 0 || undoResult != 0
+        || deleteResult != 0
+        || copyResult != 0
         || setResult != 0 || transportResult != 0
-        || previewStateResult != 0 || previewCopyResult != 0
+        || previewStateResult != 0 || previewRevisionResult != 0
+        || previewToneResult != 0
+        || previewCopyResult != 0
         || rawDestroy == nullptr
         || rawGetError == nullptr
-        || rawGetRevision == nullptr || rawCopyState == nullptr
+        || rawGetRevision == nullptr || rawExecuteUndo == nullptr
+        || rawExecuteDelete == nullptr
+        || rawCopyState == nullptr
         || rawSetState == nullptr || rawSetHostTransport == nullptr
-        || rawGetPreviewState == nullptr || rawCopyPreview == nullptr) {
+        || rawGetPreviewState == nullptr || rawGetPreviewRevision == nullptr
+        || rawGetPreviewTone == nullptr
+        || rawCopyPreview == nullptr) {
       error = "Unable to bind the managed editor entry points.";
       return false;
     }
@@ -200,10 +232,15 @@ struct Runtime final {
     destroy = reinterpret_cast<destroy_editor_fn>(rawDestroy);
     getError = reinterpret_cast<get_error_fn>(rawGetError);
     getRevision = reinterpret_cast<get_revision_fn>(rawGetRevision);
+    executeUndo = reinterpret_cast<execute_undo_fn>(rawExecuteUndo);
+    executeDelete = reinterpret_cast<execute_delete_fn>(rawExecuteDelete);
     copyState = reinterpret_cast<copy_state_fn>(rawCopyState);
     setState = reinterpret_cast<set_state_fn>(rawSetState);
     setHostTransport = reinterpret_cast<set_host_transport_fn>(rawSetHostTransport);
     getPreviewState = reinterpret_cast<get_preview_state_fn>(rawGetPreviewState);
+    getPreviewRevision = reinterpret_cast<get_preview_revision_fn>(
+        rawGetPreviewRevision);
+    getPreviewTone = reinterpret_cast<get_preview_tone_fn>(rawGetPreviewTone);
     copyPreview = reinterpret_cast<copy_preview_fn>(rawCopyPreview);
     return true;
   }
@@ -214,13 +251,25 @@ Runtime& runtime() {
   return instance;
 }
 
+bool executeManagedUndo(const bool redo) {
+  auto& shared = runtime();
+  return shared.executeUndo != nullptr && shared.executeUndo(redo ? 1 : 0) == 0;
+}
+
+bool executeManagedDelete(const bool forwardDelete) {
+  auto& shared = runtime();
+  return shared.executeDelete != nullptr
+      && shared.executeDelete(forwardDelete ? 1 : 0) == 0;
+}
+
 } // namespace
 
 namespace openutau::vst {
 
 ManagedEditorHost::~ManagedEditorHost() { destroy(); }
 
-void* ManagedEditorHost::create(const int width, const int height) {
+void* ManagedEditorHost::create(
+    const int width, const int height, const std::uint64_t instanceId) {
   destroy();
   auto& shared = runtime();
   if (!shared.initialize()) {
@@ -238,7 +287,8 @@ void* ManagedEditorHost::create(const int width, const int height) {
                  "opening this instance; both instances continue rendering independently.";
     return nullptr;
   }
-  nativeView_ = shared.create(width, height);
+  nativeView_ = shared.create(
+      width, height, static_cast<std::int64_t>(instanceId));
   if (nativeView_ == nullptr) {
     const auto* managedError = shared.getError != nullptr ? shared.getError() : nullptr;
     lastError_ = managedError != nullptr
@@ -246,7 +296,9 @@ void* ManagedEditorHost::create(const int width, const int height) {
         : "Avalonia did not create an embedded NSView.";
     shared.releaseEditor(this);
   } else {
-    installMacSpaceKeyForwarder(nativeView_, nativeViewOriginalClass_);
+    installMacSpaceKeyForwarder(
+        nativeView_, nativeViewOriginalClass_, executeManagedUndo,
+        executeManagedDelete);
     lastError_.clear();
   }
   return nativeView_;
@@ -304,13 +356,16 @@ bool ManagedEditorHost::setHostTransport(
 
 bool ManagedEditorHost::pullPreview(
     float* const interleaved, const std::size_t capacityFrames,
-    std::size_t& copiedFrames, bool& active) {
+    std::size_t& copiedFrames, bool& active, std::uint64_t& revision) {
   copiedFrames = 0;
   active = false;
+  revision = 0;
   if (nativeView_ == nullptr || runtime().getPreviewState == nullptr
+      || runtime().getPreviewRevision == nullptr
       || runtime().copyPreview == nullptr) return false;
   auto& shared = runtime();
   active = shared.getPreviewState() != 0;
+  revision = static_cast<std::uint64_t>(shared.getPreviewRevision());
   if (!active || interleaved == nullptr || capacityFrames == 0) return true;
   const auto bounded = std::min<std::size_t>(
       capacityFrames, static_cast<std::size_t>(std::numeric_limits<int32_t>::max()));
@@ -320,6 +375,21 @@ bool ManagedEditorHost::pullPreview(
   if (copied >= 0) copiedFrames = static_cast<std::size_t>(copied);
   active = shared.getPreviewState() != 0 || copiedFrames > 0;
   return true;
+}
+
+int ManagedEditorHost::previewToneState(
+    double& frequency, std::uint64_t& revision) {
+  frequency = 0.0;
+  revision = 0;
+  if (nativeView_ == nullptr || runtime().getPreviewTone == nullptr) return -1;
+  int64_t managedRevision = 0;
+  const auto state = runtime().getPreviewTone(&frequency, &managedRevision);
+  revision = static_cast<std::uint64_t>(managedRevision);
+  return state >= -1 && state <= 1 ? state : -1;
+}
+
+bool ManagedEditorHost::focus() {
+  return focusMacEditor(nativeView_, nativeViewOriginalClass_);
 }
 
 } // namespace openutau::vst

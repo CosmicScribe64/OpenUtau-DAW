@@ -29,7 +29,7 @@ notes are ready.
 Create an annotated tag on the commit being released:
 
 ```sh
-version=v0.1.0-alpha.2
+version=v0.1.0-alpha.3
 git tag -a "$version" -m "OpenUtau DAW $version"
 git push origin main
 git push origin "$version"
