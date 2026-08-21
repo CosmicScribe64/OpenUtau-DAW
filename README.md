@@ -78,7 +78,9 @@ process.
 OpenUtau is pinned as a submodule at
 `29e0e16d1623cda79ba7c3724614d6129ba3b9d5`. The VST-specific changes live in
 `patches/openutau-vst.patch`; the build scripts apply that patch before
-compiling.
+compiling. After editing files under `upstream/`, run
+`./scripts/refresh-upstream-patch.sh` to rebuild the patch and check it against
+a clean copy of the pinned OpenUtau source.
 
 More detail is available in the [architecture notes](docs/architecture.md) and
 [test record](docs/verification.md).
