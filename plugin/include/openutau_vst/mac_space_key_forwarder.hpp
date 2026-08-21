@@ -4,6 +4,7 @@ namespace openutau::vst {
 
 using MacEditorUndoHandler = bool (*)(bool redo);
 using MacEditorDeleteHandler = bool (*)(bool forwardDelete);
+using MacEditorTextInputHandler = bool (*)();
 
 // Installs an instance-local Objective-C subclass on the embedded Avalonia
 // NSView. FL transport Space variants are redirected to the enclosing
@@ -11,7 +12,8 @@ using MacEditorDeleteHandler = bool (*)(bool forwardDelete);
 // OpenUtau instead of being resolved by the host application's menu.
 bool installMacSpaceKeyForwarder(void* nativeView, void*& originalClass,
                                  MacEditorUndoHandler undoHandler,
-                                 MacEditorDeleteHandler deleteHandler);
+                                 MacEditorDeleteHandler deleteHandler,
+                                 MacEditorTextInputHandler textInputHandler);
 void uninstallMacSpaceKeyForwarder(void* nativeView, void*& originalClass);
 bool focusMacEditor(void* nativeView, void* installation);
 

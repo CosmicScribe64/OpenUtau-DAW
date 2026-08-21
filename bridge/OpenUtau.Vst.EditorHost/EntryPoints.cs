@@ -154,6 +154,17 @@ public static class EntryPoints {
         }
     }
 
+    [UnmanagedCallersOnly(EntryPoint = "OpenUtauVstEditorIsTextInputFocused",
+        CallConvs = [typeof(CallConvCdecl)])]
+    public static int IsTextInputFocused() {
+        try {
+            return EmbeddedTextInputFocused() ? 1 : 0;
+        } catch (Exception ex) {
+            SetLastError(ex.ToString());
+            return 0;
+        }
+    }
+
     private static void DeleteText(TextBox textBox, bool forwardDelete) {
         var text = textBox.Text ?? string.Empty;
         var selectionStart = Math.Min(

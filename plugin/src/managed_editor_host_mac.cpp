@@ -21,6 +21,7 @@ using get_error_fn = const char* (*)();
 using get_revision_fn = int64_t (*)();
 using execute_undo_fn = int32_t (*)(int32_t);
 using execute_delete_fn = int32_t (*)(int32_t);
+using is_text_input_focused_fn = int32_t (*)();
 using copy_state_fn = int32_t (*)(std::uint8_t*, int32_t);
 using set_state_fn = int32_t (*)(const std::uint8_t*, int32_t);
 using set_host_transport_fn = int32_t (*)(
@@ -57,6 +58,7 @@ struct Runtime final {
   get_revision_fn getRevision{};
   execute_undo_fn executeUndo{};
   execute_delete_fn executeDelete{};
+  is_text_input_focused_fn isTextInputFocused{};
   copy_state_fn copyState{};
   set_state_fn setState{};
   set_host_transport_fn setHostTransport{};
@@ -162,6 +164,7 @@ struct Runtime final {
     void* rawGetRevision{};
     void* rawExecuteUndo{};
     void* rawExecuteDelete{};
+    void* rawIsTextInputFocused{};
     void* rawCopyState{};
     void* rawSetState{};
     void* rawSetHostTransport{};
@@ -187,6 +190,9 @@ struct Runtime final {
     const auto deleteResult = loadAssembly(
         assemblyPath.c_str(), typeName, "ExecuteDelete", unmanagedCallersOnly,
         nullptr, &rawExecuteDelete);
+    const auto textInputResult = loadAssembly(
+        assemblyPath.c_str(), typeName, "IsTextInputFocused",
+        unmanagedCallersOnly, nullptr, &rawIsTextInputFocused);
     const auto copyResult = loadAssembly(
         assemblyPath.c_str(), typeName, "CopyState", unmanagedCallersOnly, nullptr,
         &rawCopyState);
@@ -210,7 +216,7 @@ struct Runtime final {
         nullptr, &rawCopyPreview);
     if (createResult != 0 || destroyResult != 0 || rawCreate == nullptr
         || errorResult != 0 || revisionResult != 0 || undoResult != 0
-        || deleteResult != 0
+        || deleteResult != 0 || textInputResult != 0
         || copyResult != 0
         || setResult != 0 || transportResult != 0
         || previewStateResult != 0 || previewRevisionResult != 0
@@ -219,7 +225,7 @@ struct Runtime final {
         || rawDestroy == nullptr
         || rawGetError == nullptr
         || rawGetRevision == nullptr || rawExecuteUndo == nullptr
-        || rawExecuteDelete == nullptr
+        || rawExecuteDelete == nullptr || rawIsTextInputFocused == nullptr
         || rawCopyState == nullptr
         || rawSetState == nullptr || rawSetHostTransport == nullptr
         || rawGetPreviewState == nullptr || rawGetPreviewRevision == nullptr
@@ -234,6 +240,8 @@ struct Runtime final {
     getRevision = reinterpret_cast<get_revision_fn>(rawGetRevision);
     executeUndo = reinterpret_cast<execute_undo_fn>(rawExecuteUndo);
     executeDelete = reinterpret_cast<execute_delete_fn>(rawExecuteDelete);
+    isTextInputFocused = reinterpret_cast<is_text_input_focused_fn>(
+        rawIsTextInputFocused);
     copyState = reinterpret_cast<copy_state_fn>(rawCopyState);
     setState = reinterpret_cast<set_state_fn>(rawSetState);
     setHostTransport = reinterpret_cast<set_host_transport_fn>(rawSetHostTransport);
@@ -260,6 +268,12 @@ bool executeManagedDelete(const bool forwardDelete) {
   auto& shared = runtime();
   return shared.executeDelete != nullptr
       && shared.executeDelete(forwardDelete ? 1 : 0) == 0;
+}
+
+bool managedTextInputFocused() {
+  auto& shared = runtime();
+  return shared.isTextInputFocused != nullptr
+      && shared.isTextInputFocused() != 0;
 }
 
 } // namespace
@@ -298,7 +312,7 @@ void* ManagedEditorHost::create(
   } else {
     installMacSpaceKeyForwarder(
         nativeView_, nativeViewOriginalClass_, executeManagedUndo,
-        executeManagedDelete);
+        executeManagedDelete, managedTextInputFocused);
     lastError_.clear();
   }
   return nativeView_;

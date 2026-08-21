@@ -53,10 +53,11 @@ so `EmbeddedShortcutRouter` tunnels key events back to the original shortcut
 table.
 
 On macOS, a view-local native responder sends Space, Command+Space, and
-Control+Space back to FL Studio. F12 also remains available for closing plug-in
-windows. While the editor is open, a window-scoped AppKit monitor sends typing,
-editor shortcuts, and pointer cursor updates directly to the embedded Avalonia
-view. The monitor is removed with the editor.
+Control+Space back to FL Studio. Plain Space remains a normal typing key while
+an OpenUtau text field has focus. F12 also remains available for closing
+plug-in windows. While the editor is open, a window-scoped AppKit monitor sends
+typing, editor shortcuts, and pointer cursor updates directly to the embedded
+Avalonia view. The monitor is removed with the editor.
 FL handles stop/rewind and pause/resume. OpenUtau handles editor commands such
 as Undo, Redo, Save/Export, Open, selection, and note editing. A host stop
 still updates the OpenUtau playhead without scrolling the editing viewport

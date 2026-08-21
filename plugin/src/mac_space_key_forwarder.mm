@@ -4,6 +4,7 @@
 #import <objc/message.h>
 #import <objc/runtime.h>
 
+#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <memory>
@@ -11,6 +12,22 @@
 #include <unordered_map>
 
 namespace {
+
+std::atomic<openutau::vst::MacEditorTextInputHandler> activeTextInputHandler{};
+
+bool isPlainSpace(NSEvent* const event) {
+  const auto relevant = event.modifierFlags
+      & (NSEventModifierFlagCommand
+         | NSEventModifierFlagControl
+         | NSEventModifierFlagOption
+         | NSEventModifierFlagShift);
+  return event.keyCode == 49 && relevant == 0;
+}
+
+bool managedTextInputFocused() {
+  const auto handler = activeTextInputHandler.load(std::memory_order_acquire);
+  return handler != nullptr && handler();
+}
 
 bool isHostTransportSpace(NSEvent* const event) {
   const auto relevant = event.modifierFlags
@@ -152,6 +169,10 @@ bool pointerEventBelongsToEditor(
 }
 
 void forwardKeyDown(id self, const SEL selector, NSEvent* const event) {
+  if (isPlainSpace(event) && managedTextInputFocused()) {
+    callOriginalKeyMethod(self, selector, event);
+    return;
+  }
   if (!isHostShortcut(event)) {
     callOriginalKeyMethod(self, selector, event);
     return;
@@ -164,6 +185,10 @@ void forwardKeyDown(id self, const SEL selector, NSEvent* const event) {
 }
 
 void forwardKeyUp(id self, const SEL selector, NSEvent* const event) {
+  if (isPlainSpace(event) && managedTextInputFocused()) {
+    callOriginalKeyMethod(self, selector, event);
+    return;
+  }
   if (!isHostShortcut(event)) {
     callOriginalKeyMethod(self, selector, event);
     return;
@@ -247,6 +272,7 @@ struct ForwarderInstallation final {
   id eventMonitor{};
   openutau::vst::MacEditorUndoHandler undoHandler{};
   openutau::vst::MacEditorDeleteHandler deleteHandler{};
+  openutau::vst::MacEditorTextInputHandler textInputHandler{};
 };
 
 bool installOnEditorView(
@@ -273,6 +299,9 @@ void uninstallEditorView(ForwarderInstallation& installation) {
   if (installation.view != nil && installation.originalClass != Nil) {
     object_setClass(installation.view, installation.originalClass);
   }
+  auto expectedHandler = installation.textInputHandler;
+  activeTextInputHandler.compare_exchange_strong(
+      expectedHandler, nullptr, std::memory_order_acq_rel);
   installation.view = nil;
   installation.originalClass = Nil;
 }
@@ -284,7 +313,8 @@ namespace openutau::vst {
 bool installMacSpaceKeyForwarder(
     void* const nativeView, void*& originalClass,
     const MacEditorUndoHandler undoHandler,
-    const MacEditorDeleteHandler deleteHandler) {
+    const MacEditorDeleteHandler deleteHandler,
+    const MacEditorTextInputHandler textInputHandler) {
   originalClass = nullptr;
   if (nativeView == nullptr) return false;
   auto installation = std::make_unique<ForwarderInstallation>();
@@ -296,6 +326,8 @@ bool installMacSpaceKeyForwarder(
   NSView* const editorView = static_cast<NSView*>(nativeView);
   installation->undoHandler = undoHandler;
   installation->deleteHandler = deleteHandler;
+  installation->textInputHandler = textInputHandler;
+  activeTextInputHandler.store(textInputHandler, std::memory_order_release);
   ForwarderInstallation* const installed = installation.get();
   installation->eventMonitor = [NSEvent
       addLocalMonitorForEventsMatchingMask:(
@@ -318,8 +350,13 @@ bool installMacSpaceKeyForwarder(
             || editorView.isHiddenOrHasHiddenAncestor) {
           return event;
         }
-        // Space belongs to the DAW transport. Unrecognised Command shortcuts
-        // likewise remain available to FL Studio (for example Command+Q).
+        // Plain Space stays in a focused text box. Elsewhere, Space belongs to
+        // the DAW transport. Unrecognised Command shortcuts likewise remain
+        // available to FL Studio (for example Command+Q).
+        if (isPlainSpace(event) && managedTextInputFocused()) {
+          dispatchEditorShortcut(editorView, event);
+          return nil;
+        }
         if (isHostShortcut(event)
             || ((event.modifierFlags & NSEventModifierFlagCommand) != 0
                 && !commandEquivalent)) {
